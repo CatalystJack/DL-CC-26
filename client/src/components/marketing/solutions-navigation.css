@@ -1,0 +1,115 @@
+.ll-solutions-brand {
+  --ll-brand-navy: #000914;
+  --ll-brand-blue: #3286c8;
+  --ll-brand-sky: #55c3e9;
+  --ll-brand-white: #fff;
+  --ll-brand-slate: #5b6b79;
+  --ll-brand-mist: #b8c4cf;
+  --ll-brand-ice: #eaf5fb;
+  --ll-font-body: "Inter", Arial, sans-serif;
+  --ll-font-headline: "Inter", Arial, sans-serif;
+  font-family: var(--ll-font-body);
+}
+
+summary.ll-solutions-nav__desktop-trigger,
+summary.ll-solutions-nav__mobile-trigger {
+  list-style: none;
+}
+
+summary.ll-solutions-nav__desktop-trigger::-webkit-details-marker,
+summary.ll-solutions-nav__mobile-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.ll-platform-menu[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.ll-solutions-nav__desktop-trigger {
+  color: rgb(255 255 255 / 0.85);
+}
+
+.ll-solutions-nav__desktop-trigger:hover {
+  color: var(--ll-brand-white);
+}
+
+#landlinq-home .ll-solutions-nav__desktop-trigger {
+  color: rgb(255 255 255 / 0.85);
+}
+
+#landlinq-home .ll-solutions-nav__desktop-trigger:hover {
+  color: var(--ll-brand-white);
+}
+
+.ll-solutions-nav__desktop-panel,
+#landlinq-home .ll-solutions-nav__desktop-panel {
+  border: 1px solid rgb(184 196 207 / 0.6);
+  border-radius: 16px;
+  background: var(--ll-brand-white);
+  color: var(--ll-brand-navy);
+  box-shadow: 0 8px 18px rgb(0 9 20 / 0.05);
+}
+
+.ll-solutions-nav__desktop-item,
+#landlinq-home .ll-solutions-nav__desktop-item {
+  border-radius: 12px;
+  color: var(--ll-brand-navy);
+  font-family: var(--ll-font-body);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.ll-solutions-nav__desktop-item:hover,
+.ll-solutions-nav__desktop-item:focus-visible,
+#landlinq-home .ll-solutions-nav__desktop-item:hover,
+#landlinq-home .ll-solutions-nav__desktop-item:focus-visible {
+  background: var(--ll-brand-ice);
+  color: var(--ll-brand-blue);
+}
+
+.ll-solutions-nav__desktop-trigger:focus-visible,
+.ll-solutions-nav__desktop-item:focus-visible,
+.ll-solutions-nav__mobile-trigger:focus-visible,
+.ll-solutions-nav__mobile-item:focus-visible {
+  outline: 2px solid var(--ll-brand-blue);
+  outline-offset: 2px;
+}
+
+.ll-solutions-nav__mobile-trigger {
+  color: rgb(255 255 255 / 0.9);
+}
+
+.ll-solutions-nav__mobile-trigger:hover,
+.ll-solutions-nav__mobile-item:hover,
+.ll-solutions-nav__mobile-item:focus-visible {
+  background: rgb(255 255 255 / 0.1);
+}
+
+.ll-solutions-nav__mobile-item {
+  color: rgb(255 255 255 / 0.75);
+  font-family: var(--ll-font-body);
+}
+
+.ll-solutions-nav__mobile-item:hover,
+.ll-solutions-nav__mobile-item:focus-visible {
+  color: var(--ll-brand-white);
+}
+
+#landlinq-home .ll-solutions-nav__mobile-trigger {
+  color: rgb(255 255 255 / 0.9);
+}
+
+#landlinq-home .ll-solutions-nav__mobile-trigger:hover,
+#landlinq-home .ll-solutions-nav__mobile-item:hover,
+#landlinq-home .ll-solutions-nav__mobile-item:focus-visible {
+  background: rgb(255 255 255 / 0.1);
+}
+
+#landlinq-home .ll-solutions-nav__mobile-item {
+  color: rgb(255 255 255 / 0.75);
+}
+
+#landlinq-home .ll-solutions-nav__mobile-item:hover,
+#landlinq-home .ll-solutions-nav__mobile-item:focus-visible {
+  color: var(--ll-brand-white);
+}

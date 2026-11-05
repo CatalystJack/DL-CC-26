@@ -1,0 +1,935 @@
+// ALL HARDCODED EMAIL FUNCTIONS COMPLETELY REMOVED
+// 100% OUTREACH MANAGEMENT TEMPLATE USAGE ENFORCED
+//
+// This file now uses TemplateService exclusively for ALL email templates.
+// NO hardcoded HTML, subjects, or content allowed anywhere.
+
+import type { EmailNotification } from './types';
+import { TemplateService, renderBrandedEmail } from './templateService';
+import { apiCallTracker } from './apiCallTracker.js';
+import { storage } from './storage';
+import { db } from './db';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+import { getAppOnlyGraphToken, getSenderAuthority, refreshMicrosoftToken, sendEmailViaMicrosoft } from './microsoftAuth';
+import { appendUnsubscribeFooter, resolveScopedBrokerId } from './emailUnsubscribe';
+import { sql } from 'drizzle-orm';
+import nodemailer from 'nodemailer';
+import { isOutboundEmailDisabled, logOutboundEmailDisabled } from './outboundEmailGuard';
+
+export const PUBLIC_TRANSACTIONAL_EMAIL = (process.env.PLATFORM_SENDER_EMAIL || 'jack@deallinq.ai').trim().toLowerCase();
+export const PUBLIC_TRANSACTIONAL_NAME = process.env.PLATFORM_SENDER_NAME || 'Jack Berg | DealLinq';
+// These GoDaddy-managed mailboxes resolve through Microsoft 365
+// (autodiscover.outlook.com / ppe-hosted.com), so use Exchange Online SMTP
+// submission rather than GoDaddy Professional Email's smtpout endpoint.
+const GODADDY_SMTP_HOST = process.env.GODADDY_SMTP_HOST || 'smtp.office365.com';
+const GODADDY_SMTP_PORT = Number(process.env.GODADDY_SMTP_PORT || 587);
+const EMAIL_LOGO_CID = 'landlinq-email-logo@landlinq.ai';
+const EMAIL_LOGO_PATH = path.join(process.cwd(), 'client/public/assets/landlinq-email-logo.png');
+let emailLogoBufferPromise: Promise<Buffer | null> | undefined;
+const EMAIL_EMOJI_PATTERN = /[\p{Emoji_Presentation}\p{Emoji_Modifier}]|\p{Extended_Pictographic}\uFE0F/gu;
+const COMPANY_PHONE_PATTERN = /(?:tel:\+?1?[\s.-]*)?\(?704\)?[\s.-]*610[\s.-]*1549/gi;
+
+function stripEmailEmojis(value: string): string {
+  return value
+    .replace(EMAIL_EMOJI_PATTERN, '')
+    .replace(/\u200D|\uFE0F/gu, '');
+}
+
+function stripCompanyPhone(value: string): string {
+  return value
+    .replace(/<a\b[^>]*href=["']tel:[^"']*704[^"']*["'][^>]*>[\s\S]*?<\/a>/gi, '')
+    .replace(COMPANY_PHONE_PATTERN, '')
+    .replace(/(?:phone|tel|call|text|sms)\s*:?\s*(?=(?:<br\s*\/?>|<\/p>|<\/div>|\||•|\n|$))/gi, '')
+    .replace(/[ \t]{2,}/g, ' ');
+}
+
+function stripLegacyCatalystBranding(value: string): string {
+  return value
+    .replace(/catalyst@landlinq\.ai/gi, 'help@landlinq.ai')
+    .replace(/deals@landlinq\.com/gi, 'deals@deallinq.ai')
+    .replace(/deals@catalyst\.landlinq\.ai/gi, 'deals@deallinq.ai')
+    .replace(/deals@landlinq\.ai/gi, 'deals@deallinq.ai')
+    .replace(/catalyst\.landlinq\.ai/gi, 'landlinq.ai')
+    .replace(/Catalyst Capital Partners/gi, 'DealLinq')
+    .replace(/Catalyst Acquisitions/gi, 'DealLinq Team')
+    .replace(/Catalyst Acquisition Team/gi, 'DealLinq Team')
+    .replace(/\bCatalyst Team\b/gi, 'DealLinq Team')
+    .replace(/\bCatalyst Security Team\b/gi, 'DealLinq Security Team')
+    .replace(/\bCatalyst\b/g, 'DealLinq')
+    .replace(/\bLand\s*Linq\b/gi, 'DealLinq');
+}
+
+const GODADDY_MAILBOXES: Record<string, { passwordEnv: string; defaultName: string }> = {
+  [PUBLIC_TRANSACTIONAL_EMAIL]: { passwordEnv: 'PLATFORM_SENDER_PASSWORD', defaultName: PUBLIC_TRANSACTIONAL_NAME },
+  'help@landlinq.ai': {
+    passwordEnv: 'HELP_EMAIL_PASSWORD',
+    defaultName: PUBLIC_TRANSACTIONAL_NAME,
+  },
+  'deals@landlinq.ai': {
+    passwordEnv: 'DEALS_EMAIL_PASSWORD',
+    defaultName: 'DealLinq Deals',
+  },
+};
+
+function getGoDaddyMailbox(email: string) {
+  return GODADDY_MAILBOXES[email.trim().toLowerCase()];
+}
+
+const GODADDY_SMTP_TRANSPORTERS = new Map<
+  string,
+  nodemailer.Transporter
+>();
+
+function getGoDaddySmtpTransporter(senderEmail: string, password: string) {
+  const mailboxKey = senderEmail.trim().toLowerCase();
+  const cachedTransporter = GODADDY_SMTP_TRANSPORTERS.get(mailboxKey);
+  if (cachedTransporter) {
+    return cachedTransporter;
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: GODADDY_SMTP_HOST,
+    port: GODADDY_SMTP_PORT,
+    secure: GODADDY_SMTP_PORT === 465,
+    requireTLS: GODADDY_SMTP_PORT === 587,
+    auth: {
+      user: senderEmail,
+      pass: password,
+    },
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 100,
+    connectionTimeout: 30_000,
+    greetingTimeout: 30_000,
+    socketTimeout: 30_000,
+  });
+
+  GODADDY_SMTP_TRANSPORTERS.set(mailboxKey, transporter);
+  return transporter;
+}
+
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function getEmailLogoBuffer(): Promise<Buffer | null> {
+  if (!emailLogoBufferPromise) {
+    emailLogoBufferPromise = readFile(EMAIL_LOGO_PATH).catch((error) => {
+      console.error(`❌ [EMAIL-LOGO] Could not load inline logo from ${EMAIL_LOGO_PATH}:`, error);
+      return null;
+    });
+  }
+  return emailLogoBufferPromise;
+}
+
+function inlineEmailLogo(html: string): string {
+  // Replace the old environment-specific/object-storage logo URL with a CID
+  // image. CID images are included in the message and render in Outlook/Gmail
+  // without requiring the client to fetch a Replit preview URL.
+  return html.replace(
+    /(<img\b[^>]*?\bsrc=["'])[^"']*(?:api\/assets\/|landlinq-email-logo\.png)[^"']*(["'][^>]*>)/gi,
+    `$1cid:${EMAIL_LOGO_CID}$2`,
+  );
+}
+
+async function sendGoDaddyEmail(
+  notification: EmailNotification,
+  senderEmail: string,
+  senderName: string,
+  htmlBody: string,
+): Promise<EmailSendResult> {
+  if (isOutboundEmailDisabled()) {
+    logOutboundEmailDisabled();
+    return { success: true };
+  }
+  const mailbox = getGoDaddyMailbox(senderEmail);
+  if (!mailbox) {
+    return { success: false, error: `No SMTP mailbox is configured for ${senderEmail}` };
+  }
+
+  const password = process.env[mailbox.passwordEnv];
+  if (!password) {
+    console.error(`❌ [GODADDY-SMTP] Missing ${mailbox.passwordEnv}; refusing to use another transport for ${senderEmail}`);
+    return { success: false, error: `Missing ${mailbox.passwordEnv} for ${senderEmail}` };
+  }
+
+  const startTime = Date.now();
+  try {
+    const logoBuffer = await getEmailLogoBuffer();
+    const emailHtml = stripLegacyCatalystBranding(logoBuffer ? inlineEmailLogo(htmlBody) : htmlBody);
+
+    const transporter = getGoDaddySmtpTransporter(senderEmail, password);
+
+    const result = await transporter.sendMail({
+      from: `${stripLegacyCatalystBranding(senderName || mailbox.defaultName)} <${senderEmail}>`,
+      to: notification.to,
+      replyTo: senderEmail,
+       subject: stripLegacyCatalystBranding(notification.subject),
+       text: stripLegacyCatalystBranding(notification.text || htmlToPlainText(emailHtml)),
+      html: emailHtml,
+      attachments: [
+        ...(notification.attachments?.length ? notification.attachments.map((attachment) => ({
+          filename: attachment.filename,
+          content: Buffer.from(attachment.content, 'base64'),
+          contentType: attachment.type,
+          contentDisposition: attachment.disposition,
+        })) : []),
+        ...(logoBuffer ? [{
+          filename: 'landlinq-email-logo.png',
+          content: logoBuffer,
+          cid: EMAIL_LOGO_CID,
+          contentType: 'image/png',
+          contentDisposition: 'inline' as const,
+        }] : []),
+      ],
+    });
+
+    apiCallTracker.logCall('GoDaddy SMTP', 'send', true, Date.now() - startTime);
+    console.log(`✅ [GODADDY-SMTP] Email sent from ${senderEmail} to ${notification.to} (${result.messageId})`);
+    return { success: true };
+  } catch (error: any) {
+    const errorMessage = error?.message || String(error);
+    apiCallTracker.logCall('GoDaddy SMTP', 'send', false, Date.now() - startTime, {
+      errorMessage,
+    });
+    console.error(`❌ [GODADDY-SMTP] Failed to send from ${senderEmail} to ${notification.to}:`, errorMessage);
+    return { success: false, error: errorMessage };
+  }
+}
+
+export type EmailSendResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type DetailedEmailSendOptions = {
+  includeError?: boolean;
+};
+
+export async function sendSystemEmail(
+  to: string,
+  subject: string,
+  htmlBody: string,
+  attachments: EmailNotification['attachments'] = [],
+  fromMailbox = PUBLIC_TRANSACTIONAL_EMAIL,
+): Promise<EmailSendResult> {
+  if (isOutboundEmailDisabled()) {
+    logOutboundEmailDisabled();
+    return { success: true };
+  }
+  const startTime = Date.now();
+  const mailbox = fromMailbox.trim().toLowerCase();
+   const cleanSubject = stripLegacyCatalystBranding(stripCompanyPhone(stripEmailEmojis(subject)));
+   const cleanHtmlBody = stripLegacyCatalystBranding(stripCompanyPhone(stripEmailEmojis(htmlBody)));
+  try {
+    const accessToken = await getAppOnlyGraphToken();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let response: Response;
+    try {
+      response = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/sendMail`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          message: {
+             subject: cleanSubject,
+            body: { contentType: 'HTML', content: cleanHtmlBody },
+            toRecipients: [{ emailAddress: { address: to } }],
+            ...(attachments?.length ? {
+              attachments: attachments.map((attachment) => ({
+                '@odata.type': '#microsoft.graph.fileAttachment',
+                name: attachment.filename,
+                contentType: attachment.type,
+                contentBytes: attachment.content,
+                isInline: attachment.disposition === 'inline',
+                ...((attachment as any).contentId ? { contentId: (attachment as any).contentId } : {}),
+              })),
+            } : {}),
+          },
+          saveToSentItems: true,
+        }),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Microsoft Graph send failed (${response.status}): ${errorBody}`);
+    }
+    apiCallTracker.logCall('Other', 'Microsoft Graph sendMail', true, Date.now() - startTime);
+    console.log(`✅ [GRAPH-SYSTEM] Email sent from ${mailbox} to ${to}`);
+    return { success: true };
+  } catch (error: any) {
+    const errorMessage = error?.message || String(error);
+    apiCallTracker.logCall('Other', 'Microsoft Graph sendMail', false, Date.now() - startTime, {
+      errorMessage,
+    });
+    console.error(`❌ [GRAPH-SYSTEM] Failed to send from ${mailbox} to ${to}:`, errorMessage);
+    return { success: false, error: errorMessage };
+  }
+}
+
+// Email sending function
+export function sendNotificationEmail(
+  notification: EmailNotification,
+  disableClickTracking?: boolean,
+): Promise<boolean>;
+export function sendNotificationEmail(
+  notification: EmailNotification,
+  disableClickTracking: boolean,
+  options: DetailedEmailSendOptions & { includeError: true },
+): Promise<EmailSendResult>;
+export async function sendNotificationEmail(
+  notification: EmailNotification,
+  disableClickTracking: boolean = true,
+  options: DetailedEmailSendOptions = {},
+): Promise<boolean | EmailSendResult> {
+  const includeError = options.includeError === true;
+  if (isOutboundEmailDisabled()) {
+    logOutboundEmailDisabled();
+    return includeError ? { success: true } : true;
+  }
+  const startTime = Date.now();
+  const failure = (error: string): false | EmailSendResult =>
+    includeError ? { success: false, error } : false;
+  notification = {
+    ...notification,
+    subject: stripLegacyCatalystBranding(stripCompanyPhone(stripEmailEmojis(notification.subject))),
+    text: notification.text ? stripLegacyCatalystBranding(stripCompanyPhone(stripEmailEmojis(notification.text))) : notification.text,
+    html: notification.html ? stripLegacyCatalystBranding(stripCompanyPhone(stripEmailEmojis(notification.html))) : notification.html,
+  };
+  const senderEmail = notification.fromEmail?.trim().toLowerCase() || PUBLIC_TRANSACTIONAL_EMAIL;
+  const senderName = senderEmail === PUBLIC_TRANSACTIONAL_EMAIL
+    ? PUBLIC_TRANSACTIONAL_NAME
+    : notification.fromName || PUBLIC_TRANSACTIONAL_NAME;
+  const isGoDaddySender = Boolean(getGoDaddyMailbox(senderEmail));
+  
+  try {
+    // MASTER MESSAGING TOGGLE CHECK (Dec 16, 2025)
+    // If master messaging is OFF, block outreach/drip emails only.
+    // Transactional deal notifications to partner developers always go through.
+    const TRANSACTIONAL_TYPES = ['developer-deal', 'developer_deal_info', 'broker_approval', 'high'];
+    const isTransactional = TRANSACTIONAL_TYPES.includes(notification.type) || notification.priority === 'high';
+    try {
+      if (!isTransactional) {
+        const settings = await storage.getBusinessSettings();
+        const masterEnabled = (settings as any)?.outreachMasterEnabled !== false;
+        if (!masterEnabled) {
+          console.log('🚫 [EMAIL-BLOCKED] Master Messaging is OFF - email not sent');
+          console.log(`   To: ${notification.to}`);
+          console.log(`   Subject: ${notification.subject}`);
+          return failure('Email sending is disabled by the master messaging setting');
+        }
+      }
+    } catch (toggleError) {
+      // If we can't check the toggle, fail open (allow sending) to not break critical notifications
+      console.warn('⚠️ [EMAIL] Could not check master toggle, proceeding with send:', toggleError);
+    }
+
+    const rawHtml = notification.html || (notification.text ? transformTextToHTML(notification.text) : '');
+    const graphHtml = rawHtml
+      ? (rawHtml.includes('landlinq-branded-email')
+        ? rawHtml
+        : renderBrandedEmail({ title: notification.subject, bodyHtml: rawHtml }))
+      : '';
+    const cleanGraphHtml = stripLegacyCatalystBranding(graphHtml);
+
+    // Platform mailboxes (help@ / deals@): Microsoft 365 rejects password-based
+    // SMTP AUTH (535 5.7.3), so send through Microsoft Graph with the app-only
+    // token first. The mailbox is still the actual sender. SMTP remains only as
+    // a fallback for when Graph is not configured or not consented.
+    if (isGoDaddySender) {
+      if (!notification.subject || !cleanGraphHtml) {
+        console.error(`❌ [PLATFORM-EMAIL] Message has no rendered subject/body; refusing to send from ${senderEmail}`);
+        return failure('The email has no rendered subject or body');
+      }
+      const logoBuffer = await getEmailLogoBuffer();
+      const graphPlatformResult = await sendSystemEmail(
+        notification.to,
+        notification.subject,
+        logoBuffer ? inlineEmailLogo(cleanGraphHtml) : cleanGraphHtml,
+        [
+          ...(notification.attachments || []),
+          ...(logoBuffer ? [{
+            filename: 'landlinq-email-logo.png',
+            content: logoBuffer.toString('base64'),
+            type: 'image/png',
+            disposition: 'inline',
+            contentId: EMAIL_LOGO_CID,
+          } as any] : []),
+        ],
+        senderEmail,
+      );
+      if (graphPlatformResult.success) return includeError ? graphPlatformResult : true;
+      console.warn(`⚠️ [PLATFORM-EMAIL] Graph send failed for ${senderEmail}; falling back to SMTP: ${graphPlatformResult.error}`);
+      const smtpResult = await sendGoDaddyEmail(
+        notification,
+        senderEmail,
+        stripLegacyCatalystBranding(senderName),
+        cleanGraphHtml,
+      );
+      if (smtpResult.success) return includeError ? smtpResult : true;
+      return failure(`Graph: ${graphPlatformResult.error} | SMTP: ${smtpResult.error}`);
+    }
+
+    if (notification.subject && cleanGraphHtml) {
+      console.log(`📧 [GRAPH-SYSTEM] Attempting platform email to ${notification.to}`);
+      const graphResult = await sendSystemEmail(
+        notification.to,
+        notification.subject,
+        cleanGraphHtml,
+        notification.attachments,
+        senderEmail,
+      );
+      if (graphResult.success) return includeError ? graphResult : true;
+      return includeError ? graphResult : false;
+    }
+
+    console.error(`❌ [EMAIL] No configured transport delivered message from ${senderEmail} to ${notification.to}`);
+    return failure('No configured transport delivered the message');
+  } catch (error: any) {
+    const errorMessage = error?.message || String(error);
+    console.error('❌ [EMAIL] Failed to send notification:', errorMessage);
+    return failure(errorMessage);
+  }
+}
+
+export interface OutlookNotificationSender {
+  id: string;
+  name: string;
+  email: string;
+  developerProfileId?: string | null;
+  microsoftAccessToken: string | null;
+  microsoftRefreshToken: string | null;
+  microsoftTokenExpiry: Date | string | null;
+}
+
+/**
+ * Send a locally-rendered transactional notification through the company's
+ * connected Outlook account. The Graph /me endpoint makes the authenticated
+ * Outlook mailbox the actual From address.
+ */
+export async function sendNotificationEmailViaOutlookSender(
+  notification: EmailNotification,
+  sender: OutlookNotificationSender,
+): Promise<boolean> {
+  if (isOutboundEmailDisabled()) {
+    logOutboundEmailDisabled();
+    return true;
+  }
+  try {
+    let accessToken = sender.microsoftAccessToken;
+    const expiry = sender.microsoftTokenExpiry ? new Date(sender.microsoftTokenExpiry) : null;
+    const needsRefresh = !accessToken || (expiry && expiry <= new Date(Date.now() + 5 * 60 * 1_000));
+    if (needsRefresh && sender.microsoftRefreshToken) {
+      const refreshed = await refreshMicrosoftToken(
+        sender.microsoftRefreshToken,
+        getSenderAuthority(Boolean(sender.developerProfileId)),
+      );
+      accessToken = refreshed.accessToken;
+      await db.execute(sql`
+        UPDATE outreach_senders
+        SET microsoft_access_token = ${refreshed.accessToken},
+            microsoft_refresh_token = ${refreshed.refreshToken ?? sender.microsoftRefreshToken},
+            microsoft_token_expiry = ${refreshed.expiresAt},
+            updated_at = NOW()
+        WHERE id = ${sender.id}
+      `);
+    }
+    if (!accessToken) {
+      console.error(`❌ [OUTLOOK-NOTIFICATION] Sender ${sender.id} has no usable access token`);
+      return false;
+    }
+
+    const subject = stripLegacyCatalystBranding(stripCompanyPhone(stripEmailEmojis(notification.subject)));
+    const rawHtml = notification.html || (notification.text ? transformTextToHTML(notification.text) : '');
+    const brandedHtml = rawHtml.includes('landlinq-branded-email')
+      ? rawHtml
+      : renderBrandedEmail({ title: subject, bodyHtml: rawHtml });
+    const logoBuffer = await getEmailLogoBuffer();
+    let htmlBody = stripLegacyCatalystBranding(logoBuffer ? inlineEmailLogo(brandedHtml) : brandedHtml);
+    if (sender.developerProfileId) {
+      const profileResult = await db.execute(sql`
+        SELECT email_unsubscribe_enabled
+        FROM developer_profiles
+        WHERE id = ${sender.developerProfileId} AND is_active = true
+        LIMIT 1
+      `);
+      const unsubscribeEnabled = (profileResult.rows?.[0] as any)?.email_unsubscribe_enabled === true;
+      if (unsubscribeEnabled) {
+        const brokerId = await resolveScopedBrokerId(
+          notification.brokerId,
+          notification.to,
+          sender.developerProfileId,
+        );
+        if (!brokerId) {
+          throw new Error(`Cannot send organization notification without a scoped broker for ${notification.to}`);
+        }
+        htmlBody = appendUnsubscribeFooter(htmlBody, brokerId, sender.developerProfileId);
+      }
+    }
+    const attachments = [
+      ...(notification.attachments || []).map((attachment) => ({
+        filename: attachment.filename,
+        contentType: attachment.type,
+        contentBytes: attachment.content,
+        isInline: attachment.disposition === 'inline',
+      })),
+      ...(logoBuffer ? [{
+        filename: 'landlinq-email-logo.png',
+        contentType: 'image/png',
+        contentBytes: logoBuffer.toString('base64'),
+        isInline: true,
+        contentId: EMAIL_LOGO_CID,
+      }] : []),
+    ];
+
+    await sendEmailViaMicrosoft(accessToken, {
+      to: notification.to,
+      subject,
+      htmlBody,
+      attachments,
+    });
+    console.log(`✅ [OUTLOOK-NOTIFICATION] Email sent from ${sender.email} to ${notification.to}`);
+    return true;
+  } catch (error: any) {
+    console.error(`❌ [OUTLOOK-NOTIFICATION] Failed to send from ${sender.email}:`, error?.message || error);
+    return false;
+  }
+}
+
+// Helper to get analyst information based on deal classification and product type
+function getAnalystInfo(classification: 'green' | 'yellow' | 'red', productType?: string) {
+  // Team assignments based on product type
+  const teamAssignments = {
+    'conventional-apartments': { analystName: 'Austin', analystEmail: 'austin@catalystcp.com' },
+    'active-adult': { analystName: 'Austin', analystEmail: 'austin@catalystcp.com' },
+    'btr': { analystName: 'Davis', analystEmail: 'davis@catalystcp.com' },
+    'build-to-rent': { analystName: 'Davis', analystEmail: 'davis@catalystcp.com' },
+    'lot-development': { analystName: 'Davis', analystEmail: 'davis@catalystcp.com' }
+  };
+
+  const team = teamAssignments[productType as keyof typeof teamAssignments] || 
+    { analystName: 'Austin', analystEmail: 'austin@catalystcp.com' };
+
+  return {
+    ...team,
+    classification,
+    classificationColor: classification === 'green' ? '#22c55e' : 
+                        classification === 'yellow' ? '#eab308' : '#ef4444'
+  };
+}
+
+// Main email service with ALL functions using TemplateService exclusively
+const emailService = {
+  async sendConfirmationEmail(brokerName: string, brokerEmail: string, deal: any, passwordSetupToken?: string): Promise<boolean> {
+    console.log('📧 [EMAIL-CONFIRM] Starting confirmation email process...');
+    console.log('📧 [EMAIL-CONFIRM] Broker:', brokerName, '|', brokerEmail);
+    console.log('📧 [EMAIL-CONFIRM] Deal ID:', deal.id, '| Address:', deal.address);
+    
+    // Build password setup URL and HTML section if token provided (for new brokers)
+    const passwordSetupUrl = passwordSetupToken 
+      ? `https://landlinq.ai/reset-password?token=${passwordSetupToken}`
+      : '';
+    
+    const passwordSetupSection = passwordSetupToken ? `
+      <div style="background-color: #fef3c7; border-left: 4px solid #d4af37; padding: 25px; margin: 30px 0; border-radius: 6px;">
+        <h3 style="color: #92400e; margin: 0 0 15px 0; font-size: 18px;">🔐 Set Up Your Dashboard Access</h3>
+        <p style="color: #92400e; margin: 0 0 15px 0; font-size: 15px; line-height: 1.6;">
+          This is your first submission! To track your deal status online, please set up your password by clicking the button below.
+        </p>
+        <div style="text-align: center; margin: 20px 0;">
+          <a href="${passwordSetupUrl}" style="background-color: #4A90E2; color: white; padding: 15px 40px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px; box-shadow: 0 2px 4px rgba(74, 144, 226, 0.3);">Set Up Your Password</a>
+        </div>
+        <p style="color: #92400e; margin: 10px 0 0 0; font-size: 13px; text-align: center; font-style: italic;">
+          This link expires in 1 hour for security
+        </p>
+      </div>
+    ` : '';
+    
+    if (passwordSetupToken) {
+      console.log('🔐 [EMAIL-CONFIRM] Password setup link included for new broker');
+    }
+    
+    // Prepare all template variables required by deal_submitted template
+    const templateVars = {
+      brokerName,
+      propertyAddress: deal.address || 'Property',
+      address: deal.address || 'Property',
+      dealId: deal.id || 'N/A',
+      date: new Date().toLocaleDateString(),
+      dealValue: deal.price ? `$${deal.price.toLocaleString()}` : 'TBD',
+      analystName: deal.assignedAnalyst || 'Austin Blondell',
+      passwordSetupSection,  // Conditional HTML section for new brokers
+      // NOTE: logoUrl, companyName, contactPhone, contactEmail, etc. are fetched from businessSettings by templateService
+      // Do NOT hardcode them here - they will be added by templateService from the database
+    };
+    
+    console.log('📧 [EMAIL-CONFIRM] Looking for "Deal Submitted" template in outreach management...');
+    
+    // Get processed template from outreach management tab
+    const template = await TemplateService.getEmailTemplate('Deal Submitted', templateVars);
+    
+    if (!template) {
+      console.error('❌ [EMAIL-CONFIRM] FAILED: No "Deal Submitted" email template found in outreach management');
+      console.error('❌ [EMAIL-CONFIRM] Email NOT sent to:', brokerEmail);
+      return false;
+    }
+    
+    console.log('✅ [EMAIL-CONFIRM] Template found! Subject:', template.subject);
+    console.log('📧 [EMAIL-CONFIRM] Preparing locally-rendered HTML email...');
+    const notification: EmailNotification = {
+      to: brokerEmail,
+      subject: template.subject,
+      html: template.html,
+      text: template.content, // Plain text version from template
+      type: 'confirmation',
+      priority: 'medium'
+    };
+    
+    const result = await sendNotificationEmail(notification);
+    
+    if (result) {
+      console.log('✅ [EMAIL-CONFIRM] SUCCESS: Confirmation email sent to', brokerEmail);
+    } else {
+      console.error('❌ [EMAIL-CONFIRM] FAILED: Could not send email to', brokerEmail);
+    }
+    
+    return result;
+  },
+
+  async sendMissingInfoEmail(brokerName: string, brokerEmail: string, deal: any, missingFields: string[]): Promise<boolean> {
+    console.log('📧 [MISSING-INFO] Starting missing info request email...');
+    console.log('📧 [MISSING-INFO] Broker:', brokerName, '|', brokerEmail);
+    console.log('📧 [MISSING-INFO] Deal ID:', deal.id, '| Missing:', missingFields.join(', '));
+    
+    // Prepare template variables for info_missing template
+    const templateVars = {
+      brokerName,
+      propertyAddress: deal.address || 'Your Property',
+      address: deal.address || 'Your Property',
+      dealId: deal.id || 'N/A',
+      missingFields: missingFields.join(', '),
+      missingFieldsList: missingFields.map(f => `• ${f}`).join('\n'),
+      // NOTE: logoUrl, companyName, contactPhone, contactEmail, etc. are fetched from businessSettings by templateService
+      // Do NOT hardcode them here - they will be added by templateService from the database
+    };
+    
+    console.log('📧 [MISSING-INFO] Looking for "Info Missing" template in outreach management...');
+    
+    // Get processed template from outreach management tab
+    const template = await TemplateService.getEmailTemplate('Info Missing', templateVars);
+    
+    if (!template) {
+      console.error('❌ [MISSING-INFO] FAILED: No "Info Missing" email template found in outreach management');
+      console.error('❌ [MISSING-INFO] Email NOT sent to:', brokerEmail);
+      return false;
+    }
+    
+    console.log('✅ [MISSING-INFO] Template found! Subject:', template.subject);
+    console.log('📧 [MISSING-INFO] Preparing locally-rendered HTML email...');
+    const notification: EmailNotification = {
+      to: brokerEmail,
+      subject: template.subject,
+      html: template.html,
+      text: template.content, // Plain text version from template
+      type: 'info_request',
+      priority: 'medium'
+    };
+    
+    const result = await sendNotificationEmail(notification);
+    
+    if (result) {
+      console.log('✅ [MISSING-INFO] SUCCESS: Missing info request sent to', brokerEmail);
+    } else {
+      console.error('❌ [MISSING-INFO] FAILED: Could not send email to', brokerEmail);
+    }
+    
+    return result;
+  },
+
+  async sendGreenlightEmail(brokerName: string, brokerEmail: string, address: string, productType?: string): Promise<boolean> {
+    const analystInfo = getAnalystInfo('green', productType);
+    
+    const templateVars = { 
+      brokerName, 
+      address,
+      propertyAddress: address,
+      analystName: analystInfo.analystName,
+      analystEmail: analystInfo.analystEmail,
+      productType,
+      classification: 'green',
+      classificationEmoji: '🟢',
+    };
+    
+    // Get processed template from outreach management tab
+    const template = await TemplateService.getEmailTemplate('status_pursuing', templateVars);
+    
+    if (!template) {
+      console.error('No status_pursuing email template configured in outreach management');
+      return false;
+    }
+    
+    const notification: EmailNotification = {
+      to: brokerEmail,
+      subject: template.subject,
+      html: template.html,
+      text: template.content,
+      type: 'deal_alert',
+      priority: 'high'
+    };
+    
+    return await sendNotificationEmail(notification);
+  },
+
+  async sendPassEmail(brokerName: string, brokerEmail: string, address: string, rejectionReason?: string): Promise<boolean> {
+    const templateVars = { 
+      brokerName, 
+      address,
+      propertyAddress: address,
+      rejectionReason,
+      classification: 'red',
+      classificationEmoji: '🔴',
+    };
+    
+    // Get processed template from outreach management tab
+    const template = await TemplateService.getEmailTemplate('status_rejected', templateVars);
+    
+    if (!template) {
+      console.error('No status_rejected email template configured in outreach management');
+      return false;
+    }
+    
+    const notification: EmailNotification = {
+      to: brokerEmail,
+      subject: template.subject,
+      html: template.html,
+      text: template.content,
+      type: 'status_update',
+      priority: 'medium'
+    };
+    
+    return await sendNotificationEmail(notification);
+  },
+
+  // Helper function to convert plain text to simple HTML
+  convertTextToHtml(text: string): string {
+    return text
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n/g, '<br>')
+      .replace(/^/, '<p>')
+      .replace(/$/, '</p>')
+      .replace(/E: (.*?)$/gm, 'E: <a href="mailto:$1">$1</a>')
+      .replace(/W: (.*?)$/gm, 'W: <a href="$1" target="_blank">$1</a>');
+  },
+
+  /**
+   * Send password reset email using outreach management templates ONLY
+   */
+  async sendPasswordResetEmail(email: string, resetToken: string): Promise<void> {
+    try {
+      console.log(`📧 Sending password reset email to: ${email}`);
+      
+      // Create password reset link
+      const resetUrl = `${process.env.BASE_URL || 'https://landlinq.ai'}/reset-password?token=${resetToken}`;
+      
+      const templateVars = {
+        resetUrl,
+        resetToken,
+        userEmail: email
+      };
+      
+      // Get processed template from outreach management system
+      const template = await TemplateService.getEmailTemplate('Password Reset', templateVars);
+      
+      // CRITICAL: No fallbacks - template MUST exist in outreach management
+      if (!template) {
+        console.error(`❌ CRITICAL: Password reset template not found in outreach management. Configure the "password_reset" template in the outreach tab.`);
+        throw new Error('Password reset template not configured in outreach management. All templates must be configured in the outreach tab.');
+      }
+      
+      // Send email using the locally-rendered template.
+      const sent = await sendNotificationEmail({
+        to: email,
+        subject: template.subject,
+        html: template.html,
+        text: template.content,
+        type: 'password_reset',
+        priority: 'high',
+        transactional: true
+      });
+      if (!sent) throw new Error('Password reset email failed to send');
+      
+      console.log(`✅ Password reset email sent to: ${email}`);
+      
+    } catch (error) {
+      console.error('❌ Failed to send password reset email:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Send SMS opt-in email to brokers without phone numbers
+   * Uses outreach management templates ONLY
+   */
+  async sendSMSOptInEmail(brokerName: string, brokerEmail: string): Promise<boolean> {
+    console.log('📧 [SMS-OPT-IN] Starting SMS opt-in email process...');
+    console.log('📧 [SMS-OPT-IN] Broker:', brokerName, '|', brokerEmail);
+    
+    // Create opt-in URL
+    const baseUrl = process.env.REPLIT_DOMAINS 
+      ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}`
+      : 'https://landlinq.ai';
+    const optInUrl = `${baseUrl}/sms-opt-in`;
+    
+    // Prepare template variables for SMS opt-in template
+    const templateVars = {
+      brokerName,
+      optInUrl,
+      dashboardUrl: `${baseUrl}/dashboard`,
+    };
+    
+    console.log('📧 [SMS-OPT-IN] Looking for "SMS Opt-In" template in outreach management...');
+    
+    // Get processed template from outreach management tab
+    const template = await TemplateService.getEmailTemplate('SMS Opt-In', templateVars);
+    
+    if (!template) {
+      console.error('❌ [SMS-OPT-IN] FAILED: No "SMS Opt-In" email template found in outreach management');
+      console.error('❌ [SMS-OPT-IN] Email NOT sent to:', brokerEmail);
+      return false;
+    }
+    
+    console.log('✅ [SMS-OPT-IN] Template found! Subject:', template.subject);
+    console.log('📧 [SMS-OPT-IN] Preparing locally-rendered HTML email...');
+    const notification: EmailNotification = {
+      to: brokerEmail,
+      subject: template.subject,
+      html: template.html,
+      text: template.content,
+      type: 'info_request',
+      priority: 'medium'
+    };
+    
+    const result = await sendNotificationEmail(notification);
+    
+    if (result) {
+      console.log('✅ [SMS-OPT-IN] SUCCESS: SMS opt-in email sent to', brokerEmail);
+    } else {
+      console.error('❌ [SMS-OPT-IN] FAILED: Could not send email to', brokerEmail);
+    }
+    
+    return result;
+  },
+
+  /**
+   * Send confirmation email when deal is updated from email reply
+   */
+  async sendDealUpdateConfirmation(
+    brokerEmail: string,
+    deal: any,
+    fieldsUpdated: string[]
+  ): Promise<boolean> {
+    console.log(`📧 [DEAL-UPDATE] Sending update confirmation to ${brokerEmail}`);
+    console.log(`   Deal ID: ${deal.id}`);
+    console.log(`   Fields updated: ${fieldsUpdated.join(', ')}`);
+    
+    const baseUrl = `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+    
+    const templateVars = {
+      dealId: deal.id,
+      propertyAddress: deal.address || 'Property',
+      fieldsUpdated: fieldsUpdated.join(', '),
+      brokerName: deal.contactName || 'Valued Partner',
+      // NOTE: logoUrl, companyName, contactPhone, contactEmail, etc. are fetched from businessSettings by templateService
+    };
+    
+    // Try to get a custom template, or use a generic confirmation
+    const template = await TemplateService.getEmailTemplate('Deal Update Confirmation', templateVars);
+    
+    // If no custom template, create a simple confirmation
+    const finalSubject = template?.subject || `Deal Update Received - ${deal.address}`;
+    const finalHtml = template?.html || `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2>Thank You for the Update!</h2>
+        <p>We've successfully updated your property submission with the information you provided.</p>
+        <p><strong>Deal ID:</strong> ${deal.id}</p>
+        <p><strong>Property:</strong> ${deal.address}</p>
+        <p><strong>Updated Fields:</strong> ${fieldsUpdated.join(', ')}</p>
+        <p>We're re-analyzing the property with this new information and will be in touch soon.</p>
+        <p>Thank you for your partnership!</p>
+      </div>
+    `;
+    
+    const notification: EmailNotification = {
+      to: brokerEmail,
+      subject: finalSubject,
+      html: finalHtml,
+      text: template?.content || `Thank you for updating your property submission (Deal ID: ${deal.id}). We've updated: ${fieldsUpdated.join(', ')}. We're re-analyzing the property and will be in touch soon.`,
+      type: 'confirmation',
+      priority: 'medium'
+    };
+    
+    const result = await sendNotificationEmail(notification);
+    
+    if (result) {
+      console.log('✅ [DEAL-UPDATE] Update confirmation sent');
+    } else {
+      console.error('❌ [DEAL-UPDATE] Failed to send confirmation');
+    }
+    
+    return result;
+  }
+};
+
+// REMOVED: ALL hardcoded email generation functions
+// REMOVED: generatePropertyAlertEmail - Use TemplateService.getEmailTemplate() exclusively  
+// REMOVED: generateZoningAlertEmail - Use TemplateService.getEmailTemplate() exclusively
+// REMOVED: generateLandValuationShareEmail - Use TemplateService.getEmailTemplate() exclusively  
+// REMOVED: generateBrokerInvitationEmail - Use TemplateService.getEmailTemplate() exclusively
+// REMOVED: generateBrokerApprovalEmail - Use TemplateService.getEmailTemplate() exclusively
+// REMOVED: generateTeamDealNotificationEmail - Use TemplateService.getEmailTemplate() exclusively
+// REMOVED: generateBrokerRejectionEmail - Use TemplateService.getEmailTemplate() exclusively  
+// REMOVED: generateMissingInfoFollowupEmail - Use TemplateService.getEmailTemplate() exclusively
+//
+// ALL EMAIL TEMPLATES MUST BE CONFIGURED IN THE OUTREACH MANAGEMENT TAB
+// NO HARDCODED HTML, SUBJECTS, OR CONTENT ALLOWED
+
+// Simple text to HTML transformation function (utility only)
+export function transformTextToHTML(text: string): string {
+  if (!text) return '';
+  
+  return text
+    // First escape HTML characters to prevent corruption
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    // Convert double newlines to paragraph breaks
+    .replace(/\n\s*\n/g, '<br><br>')
+    // Convert single newlines to line breaks
+    .replace(/\n/g, '<br>')
+    // Convert multiple spaces to non-breaking spaces
+    .replace(/  +/g, (match) => '&nbsp;'.repeat(match.length))
+    // Convert leading spaces to non-breaking spaces
+    .replace(/^( +)/gm, (match) => '&nbsp;'.repeat(match.length));
+}
+
+// Export named and default for compatibility
+export { emailService };
+export default emailService;

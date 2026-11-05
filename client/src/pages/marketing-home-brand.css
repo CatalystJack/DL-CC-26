@@ -1,0 +1,1149 @@
+#landlinq-home {
+  --ll-home-navy: #000914 !important;
+  --ll-home-blue: #3286c8 !important;
+  --ll-home-light-blue: #55c3e9 !important;
+  --ll-home-blue-wash: #eaf5fb !important;
+  --ll-home-white: #fff !important;
+  --ll-home-slate: #5b6b79 !important;
+  --ll-home-mist: #b8c4cf !important;
+  --ll-font-body: "Inter", Arial, sans-serif;
+  --ll-font-headline: "Inter", Arial, sans-serif;
+  background-color: var(--ll-home-white) !important;
+  color: var(--ll-home-navy) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+/* Keep the existing replica palettes local while the page chrome uses brand tokens. */
+#landlinq-home .ll-hero-dashboard,
+#landlinq-home .ll-step-surface {
+  --ll-home-navy: #081526;
+  --ll-home-blue: #3286c8;
+  --ll-home-light-blue: #55c3e9;
+  --ll-home-blue-wash: #d6f9fc;
+  --ll-home-white: #fff;
+}
+
+#landlinq-home :where(
+  *:not(.ll-hero-dashboard)
+    :not(.ll-hero-dashboard *)
+    :not(.ll-step-surface)
+    :not(.ll-step-surface *)
+    :not(.brand-wordmark__text)
+) {
+  color: var(--ll-home-navy) !important;
+  border-color: rgb(184 196 207 / 0.6) !important;
+}
+
+#landlinq-home > header {
+  background-color: transparent !important;
+  color: var(--ll-home-white) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+#landlinq-home .ll-solutions-nav__desktop-trigger,
+#landlinq-home .ll-solutions-nav__mobile-trigger,
+#landlinq-home .ll-solutions-nav__mobile-item {
+  color: var(--ll-home-white) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+#landlinq-home .ll-solutions-nav__desktop-panel {
+  border-color: rgb(184 196 207 / 0.6) !important;
+  background-color: var(--ll-home-white) !important;
+  color: var(--ll-home-navy) !important;
+}
+
+#landlinq-home .ll-solutions-nav__desktop-item {
+  color: var(--ll-home-navy) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+#landlinq-home .ll-solutions-nav__desktop-item:hover,
+#landlinq-home .ll-solutions-nav__desktop-item:focus-visible {
+  background-color: var(--ll-home-blue-wash) !important;
+  color: var(--ll-home-blue) !important;
+}
+
+#landlinq-home > header .ll-marketing-about-link {
+  color: rgb(255 255 255 / 0.85) !important;
+  border-color: transparent !important;
+}
+
+#landlinq-home > header .ll-marketing-about-link:hover,
+#landlinq-home > header .ll-marketing-about-link:focus-visible {
+  color: #fff !important;
+}
+
+#landlinq-home > header .ll-marketing-demo-link {
+  border-color: #3286c8 !important;
+  background-color: #3286c8 !important;
+  color: #fff !important;
+}
+
+#landlinq-home > header .ll-marketing-demo-link:hover,
+#landlinq-home > header .ll-marketing-demo-link:focus-visible {
+  border-color: #3286c8 !important;
+  background-color: #fff !important;
+  color: #3286c8 !important;
+}
+
+#landlinq-home > header .ll-mobile-menu-button {
+  border: 1px solid #3286c8 !important;
+  background-color: #3286c8 !important;
+  color: #fff !important;
+}
+
+#landlinq-home > header .ll-mobile-menu-button svg,
+#landlinq-home > header .ll-mobile-menu-button svg * {
+  color: #fff !important;
+  stroke: #fff !important;
+}
+
+#landlinq-home > header .ll-solutions-nav__desktop-trigger svg,
+#landlinq-home > header .ll-solutions-nav__desktop-trigger svg *,
+#landlinq-home > header .ll-solutions-nav__mobile-trigger svg,
+#landlinq-home > header .ll-solutions-nav__mobile-trigger svg * {
+  color: rgb(255 255 255 / 0.85) !important;
+  stroke: rgb(255 255 255 / 0.85) !important;
+}
+
+#landlinq-home > header .ll-mobile-menu-button:hover,
+#landlinq-home > header .ll-mobile-menu-button:focus-visible {
+  background-color: rgb(255 255 255 / 0.1) !important;
+}
+
+#landlinq-home > header a[href="/login"],
+#landlinq-home main > section:first-child a[href="/login"],
+#landlinq-home > header .ll-mobile-menu-login {
+  border: 1px solid rgb(255 255 255 / 0.7) !important;
+  border-radius: 999px !important;
+  background-color: transparent !important;
+  color: var(--ll-home-white) !important;
+  font-family: var(--ll-font-body) !important;
+  font-weight: 600 !important;
+}
+
+#landlinq-home > header a[href="/login"]:hover,
+#landlinq-home > header a[href="/login"]:focus-visible,
+#landlinq-home main > section:first-child a[href="/login"]:hover,
+#landlinq-home main > section:first-child a[href="/login"]:focus-visible,
+#landlinq-home > header .ll-mobile-menu-login:hover,
+#landlinq-home > header .ll-mobile-menu-login:focus-visible {
+  border-color: var(--ll-home-light-blue) !important;
+  background-color: transparent !important;
+  color: var(--ll-home-light-blue) !important;
+  box-shadow: none !important;
+  transform: none;
+}
+
+#landlinq-home > header a[href="/login"]:focus-visible,
+#landlinq-home main > section:first-child a[href="/login"]:focus-visible,
+#landlinq-home > header .ll-mobile-menu-login:focus-visible {
+  outline: 2px solid rgb(85 195 233 / 0.75) !important;
+  outline-offset: 3px;
+}
+
+#landlinq-home > header .ll-mobile-menu-panel {
+  border-color: rgb(184 196 207 / 0.35) !important;
+  background-color: var(--ll-home-navy) !important;
+}
+
+#landlinq-home main > section:first-child {
+  background-color: var(--ll-home-navy) !important;
+  color: var(--ll-home-white) !important;
+}
+
+#landlinq-home main > section:first-child :where(
+  *:not(.ll-hero-dashboard)
+    :not(.ll-hero-dashboard *)
+) {
+  color: var(--ll-home-white) !important;
+}
+
+#landlinq-home main > section:first-child h1.ll-reveal {
+  color: var(--ll-home-white) !important;
+}
+
+#landlinq-home main > section:first-child h1.ll-reveal span {
+  color: var(--ll-home-light-blue) !important;
+}
+
+#landlinq-home main > section:first-child .ll-reveal.ll-delay-2:not(.ll-hero-dashboard) {
+  color: rgb(255 255 255 / 0.72) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+#landlinq-home .ll-home-primary,
+#landlinq-home main > section:first-child .ll-home-primary-inverse {
+  border: 1px solid var(--ll-home-blue) !important;
+  border-radius: 999px !important;
+  background-color: var(--ll-home-blue) !important;
+  color: var(--ll-home-white) !important;
+  font-family: var(--ll-font-body) !important;
+  font-weight: 600 !important;
+}
+
+#landlinq-home .ll-home-primary:hover,
+#landlinq-home main > section:first-child .ll-home-primary-inverse:hover,
+#landlinq-home main > section:first-child .ll-home-primary-inverse:focus-visible {
+  border-color: var(--ll-home-blue) !important;
+  background-color: var(--ll-home-blue) !important;
+  color: var(--ll-home-white) !important;
+  filter: brightness(0.9);
+  box-shadow: none !important;
+  transform: none;
+}
+
+#landlinq-home .ll-home-primary:focus-visible,
+#landlinq-home main > section:first-child .ll-home-primary-inverse:focus-visible {
+  outline: 3px solid rgb(85 195 233 / 0.75) !important;
+  outline-offset: 3px;
+}
+
+#landlinq-home .ll-hero-stats {
+  border-bottom: 1px solid rgb(184 196 207 / 0.6) !important;
+  background-color: var(--ll-home-white) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+#landlinq-home .ll-hero-stat strong {
+  color: var(--ll-home-navy) !important;
+}
+
+#landlinq-home .ll-hero-stat p {
+  color: var(--ll-home-slate) !important;
+  font-family: var(--ll-font-body) !important;
+  font-size: 12px;
+  font-weight: 600 !important;
+  letter-spacing: 0.2em !important;
+}
+
+#landlinq-home main > section[data-testid="section-acquisitions-autopilot"] {
+  border-bottom: 1px solid rgb(184 196 207 / 0.6) !important;
+  background-color: var(--ll-home-blue-wash) !important;
+}
+
+#landlinq-home main > section[data-testid="section-acquisitions-autopilot"] h2,
+#landlinq-home #demo .ll-journey-intro h2,
+#landlinq-home #company h2,
+#landlinq-home #contact h2 {
+  color: var(--ll-home-navy) !important;
+}
+
+#landlinq-home main > section[data-testid="section-acquisitions-autopilot"] .max-w-2xl p,
+#landlinq-home #demo .ll-journey-intro > p,
+#landlinq-home #demo .ll-step-copy p,
+#landlinq-home #company p {
+  color: var(--ll-home-slate) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+#landlinq-home .ll-eyebrow,
+#landlinq-home .ll-eyebrow-light {
+  color: var(--ll-home-blue) !important;
+  font-family: var(--ll-font-body) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.2em !important;
+  text-transform: uppercase !important;
+}
+
+#landlinq-home main > section:first-child .ll-eyebrow,
+#landlinq-home main > section:first-child .ll-eyebrow-light,
+#landlinq-home #contact .ll-eyebrow,
+#landlinq-home #contact .ll-eyebrow-light {
+  color: var(--ll-home-light-blue) !important;
+  font-family: var(--ll-font-body) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.2em !important;
+  text-transform: uppercase !important;
+}
+
+#landlinq-home #demo .ll-step-copy h3 {
+  color: var(--ll-home-navy) !important;
+}
+
+#landlinq-home #demo [data-testid="demo-section-tabs"] [role="tablist"] {
+  border: 1px solid rgb(184 196 207 / 0.6) !important;
+  border-radius: 999px !important;
+  background-color: var(--ll-home-blue-wash) !important;
+  color: var(--ll-home-slate) !important;
+}
+
+#landlinq-home #demo [data-testid="demo-section-tabs"] [role="tab"] {
+  border-radius: 999px !important;
+  background-color: transparent !important;
+  color: var(--ll-home-slate) !important;
+  font-family: var(--ll-font-body) !important;
+  font-weight: 600 !important;
+}
+
+#landlinq-home #demo [data-testid="demo-section-tabs"] [role="tab"][data-state="active"] {
+  background-color: var(--ll-home-white) !important;
+  color: var(--ll-home-navy) !important;
+}
+
+#landlinq-home #demo [data-testid="demo-section-tabs"] [role="tab"]:hover,
+#landlinq-home #demo [data-testid="demo-section-tabs"] [role="tab"]:focus-visible {
+  color: var(--ll-home-blue) !important;
+}
+
+#landlinq-home #demo [data-testid="demo-section-tabs"] [role="tab"]:focus-visible {
+  --tw-ring-color: var(--ll-home-blue) !important;
+  --tw-ring-offset-color: var(--ll-home-white) !important;
+}
+
+#landlinq-home #company {
+  background-color: var(--ll-home-blue-wash) !important;
+}
+
+#landlinq-home #company button {
+  color: var(--ll-home-navy) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+#landlinq-home #company button svg {
+  color: var(--ll-home-blue) !important;
+}
+
+#landlinq-home #contact {
+  background-color: var(--ll-home-blue-wash) !important;
+}
+
+#landlinq-home #contact > div {
+  background-color: var(--ll-home-navy) !important;
+  color: var(--ll-home-white) !important;
+}
+
+#landlinq-home #contact h2 {
+  color: var(--ll-home-white) !important;
+}
+
+#landlinq-home #contact > div > div > div > p {
+  color: var(--ll-home-mist) !important;
+}
+
+#landlinq-home #contact input,
+#landlinq-home #contact textarea {
+  border-color: rgb(184 196 207 / 0.5) !important;
+  color: var(--ll-home-white) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+#landlinq-home #contact input::placeholder,
+#landlinq-home #contact textarea::placeholder {
+  color: rgb(184 196 207 / 0.7) !important;
+}
+
+#landlinq-home > footer {
+  border-top: 1px solid rgb(184 196 207 / 0.3) !important;
+  background-color: var(--ll-home-navy) !important;
+  color: var(--ll-home-white) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+#landlinq-home > footer :where(*) {
+  color: var(--ll-home-mist) !important;
+  font-family: var(--ll-font-body) !important;
+}
+
+#landlinq-home > footer h3 {
+  color: var(--ll-home-white) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.2em !important;
+  text-transform: uppercase !important;
+}
+
+#landlinq-home > footer a:hover,
+#landlinq-home > footer a:focus-visible {
+  color: var(--ll-home-light-blue) !important;
+}
+
+#landlinq-home > footer [data-testid="text-copyright"] {
+  border-color: rgb(184 196 207 / 0.3) !important;
+  color: var(--ll-home-mist) !important;
+}
+
+/* The replica sidebar stays expanded on desktop and collapses to clear icons on phones. */
+#landlinq-home .ll-demo-sidebar {
+  width: 16rem !important;
+  flex-basis: 16rem !important;
+  background: #081729 !important;
+  color: #d4e0ea !important;
+}
+
+#landlinq-home .ll-demo-sidebar > div:first-child,
+#landlinq-home .ll-demo-sidebar > div:first-child *,
+#landlinq-home .ll-demo-sidebar nav,
+#landlinq-home .ll-demo-sidebar nav *,
+#landlinq-home .ll-demo-sidebar > div:last-child,
+#landlinq-home .ll-demo-sidebar > div:last-child * {
+  color: inherit !important;
+}
+
+#landlinq-home .ll-demo-sidebar > div:first-child .bg-white\/95 {
+  color: #081729 !important;
+}
+
+#landlinq-home .ll-demo-sidebar nav > div {
+  min-height: 2.75rem;
+  color: #c5d2de !important;
+}
+
+#landlinq-home .ll-demo-sidebar nav > div.bg-white\/10 {
+  background: rgb(85 195 233 / 0.16) !important;
+  color: #70d2f3 !important;
+}
+
+#landlinq-home .ll-demo-sidebar nav > div svg {
+  color: inherit !important;
+}
+
+#landlinq-home .ll-demo-sidebar-label {
+  display: block;
+}
+
+#landlinq-home .ll-demo-sidebar-signout {
+  background: #3286c8 !important;
+  color: white !important;
+}
+
+#landlinq-home .ll-hero-dashboard,
+#landlinq-home .ll-step-surface--demo {
+  min-width: 0;
+  overflow: hidden;
+}
+
+#landlinq-home .ll-step-surface--demo > .ll-demo,
+#landlinq-home .ll-hero-dashboard .ll-machine,
+#landlinq-home .ll-step-surface--demo .ll-window,
+#landlinq-home .ll-step-surface--demo .ll-app-frame {
+  width: 100%;
+  max-width: 100%;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow-y: visible !important;
+}
+
+#landlinq-home .ll-hero-dashboard table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+#landlinq-home .ll-hero-dashboard table th,
+#landlinq-home .ll-hero-dashboard table td {
+  padding-inline: 0.25rem;
+}
+
+#landlinq-home .ll-hero-dashboard table tr > :last-child {
+  display: table-cell !important;
+  width: 4rem;
+  min-width: 4rem;
+  white-space: nowrap;
+}
+
+#landlinq-home .ll-hero-dashboard .ll-machine,
+#landlinq-home .ll-hero-dashboard .ll-machine > .ll-demo,
+#landlinq-home .ll-hero-dashboard .ll-machine .ll-window {
+  width: 100%;
+  max-width: 100%;
+}
+
+#landlinq-home .ll-step-surface--demo {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+@media (max-width: 768px) {
+  #landlinq-home .ll-demo-sidebar {
+    width: 4.5rem !important;
+    flex-basis: 4.5rem !important;
+  }
+
+  #landlinq-home .ll-demo-sidebar-label,
+  #landlinq-home .ll-demo-sidebar > div:first-child > span > span:nth-child(2) {
+    display: none !important;
+  }
+
+  #landlinq-home .ll-demo-sidebar nav > div {
+    justify-content: center;
+    padding-inline: 0.5rem;
+  }
+
+  #landlinq-home .ll-demo-sidebar-signout {
+    justify-content: center;
+    padding-inline: 0;
+  }
+}
+
+/* Homepage product demos stay a full desktop canvas, then scale as one unit. */
+#landlinq-home .ll-step-surface,
+#landlinq-home .ll-step-surface.ll-surface-paper {
+  width: 100%;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#landlinq-home .ll-demo-sidebar {
+  width: 16rem !important;
+  flex: 0 0 16rem !important;
+}
+
+#landlinq-home .ll-demo-sidebar nav > div,
+#landlinq-home .ll-demo-sidebar-signout {
+  justify-content: flex-start !important;
+  padding-inline: 0.75rem !important;
+}
+
+#landlinq-home .ll-demo-sidebar-label,
+#landlinq-home .ll-demo-sidebar > div:first-child > span > span:nth-child(2) {
+  display: block !important;
+}
+
+#landlinq-home .ll-mock-window-content > *,
+#landlinq-home .ll-mock-window-content [role="img"],
+#landlinq-home .ll-mock-window-content [aria-hidden="true"] {
+  height: 100%;
+}
+
+#landlinq-home .ll-mock-window-content .ll-developer-screen .ll-screen-content {
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+}
+
+#landlinq-home .ll-mock-window-content .ll-yoc-layout {
+  grid-template-columns: minmax(0, 1fr) 206px !important;
+  gap: 10px !important;
+}
+
+#landlinq-home .ll-mock-window-content .ll-yoc-groups {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+#landlinq-home .ll-mock-window-content .ll-contacts-row {
+  grid-template-columns: 1.15fr 1.45fr 1.15fr 1.25fr .75fr .35fr .55fr !important;
+  gap: 6px !important;
+  padding-inline: 7px !important;
+  font-size: 9px !important;
+}
+
+#landlinq-home .ll-mock-window-content .ll-contact-detail-grid {
+  grid-template-columns: minmax(180px, .72fr) minmax(0, 1.5fr) !important;
+  gap: 9px !important;
+  min-height: 0;
+}
+
+#landlinq-home .ll-mock-window-content .ll-contact-directory,
+#landlinq-home .ll-mock-window-content .ll-contact-detail,
+#landlinq-home .ll-mock-window-content .ll-outreach-analytics {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  margin-bottom: 0 !important;
+  transform: none !important;
+}
+
+#landlinq-home .ll-mock-window-content .ll-app-frame {
+  font-size: 8px !important;
+}
+
+#landlinq-home .ll-mock-window-content .ll-drip-builder,
+#landlinq-home .ll-mock-window-content .ll-drip-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 0 !important;
+  box-sizing: border-box;
+}
+
+#landlinq-home .ll-mock-window-content .ll-drip-canvas {
+  display: flex;
+  flex-direction: column;
+}
+
+#landlinq-home .ll-mock-window-content .ll-drip-window {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+#landlinq-home .ll-mock-window-content .ll-drip-content {
+  flex: 1;
+}
+
+#landlinq-home .ll-hero-dashboard .ll-machine > .ll-demo {
+  max-width: none;
+}
+
+#landlinq-home .ll-mock-window-content .ll-drip-fullscreen {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: #f6f8fa;
+  box-shadow: none;
+  font-size: 12px;
+}
+
+#landlinq-home .ll-drip-fullscreen .ll-drip-screen {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f6f8fa;
+}
+
+#landlinq-home .ll-drip-fullscreen .ll-drip-head {
+  flex: 0 0 auto;
+  align-items: center;
+  border-bottom: 1px solid #dce5eb;
+  background: white;
+  padding: 16px 24px;
+}
+
+#landlinq-home .ll-drip-fullscreen .ll-drip-head small { font-size: 10px; }
+#landlinq-home .ll-drip-fullscreen .ll-drip-head b { font-size: 20px; }
+#landlinq-home .ll-drip-fullscreen .ll-drip-head > span { font-size: 10px; }
+
+#landlinq-home .ll-drip-fullscreen .ll-drip-tabs {
+  flex: 0 0 auto;
+  gap: 10px;
+  border-bottom: 1px solid #dce5eb;
+  background: #fff;
+  padding: 8px 24px;
+}
+
+#landlinq-home .ll-drip-fullscreen .ll-drip-tabs button {
+  min-height: 48px;
+  gap: 10px;
+  padding: 7px 12px;
+}
+
+#landlinq-home .ll-drip-fullscreen .ll-drip-tabs button > b { width: 26px; height: 26px; font-size: 11px; }
+#landlinq-home .ll-drip-fullscreen .ll-drip-tabs button > span { font-size: 11px; font-weight: 600; }
+#landlinq-home .ll-drip-fullscreen .ll-drip-tabs button > span small { margin-top: 3px; font-size: 9px; }
+
+#landlinq-home .ll-drip-fullscreen .ll-drip-content {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1.55fr) minmax(310px, .9fr);
+  gap: 14px;
+  overflow: hidden;
+  padding: 16px 20px;
+  background: #f6f8fa;
+}
+
+#landlinq-home .ll-drip-primary-column,
+#landlinq-home .ll-drip-settings-column {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#landlinq-home .ll-drip-primary-column .ll-drip-sequence-panel { display: flex; flex-direction: column; min-height: 0; }
+#landlinq-home .ll-drip-primary-column .ll-drip-sequence-panel { flex: 1; }
+
+#landlinq-home .ll-drip-fullscreen .ll-drip-panel {
+  min-width: 0;
+  border: 1px solid #dce5eb;
+  border-radius: 8px;
+  background: white;
+  padding: 16px;
+}
+
+#landlinq-home .ll-drip-fullscreen .ll-drip-panel.is-current {
+  border-color: #9bc5db;
+  box-shadow: 0 0 0 2px rgb(50 134 200 / 8%);
+}
+
+#landlinq-home .ll-drip-panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+#landlinq-home .ll-drip-panel-heading > div { min-width: 0; flex: 1; }
+#landlinq-home .ll-drip-panel-heading small { color: #78909f; font-size: 9px; font-weight: 700; letter-spacing: .1em; }
+#landlinq-home .ll-drip-panel-heading h3 { margin: 3px 0 0; color: #183047; font-size: 14px; font-weight: 600; }
+#landlinq-home .ll-drip-number,
+#landlinq-home .ll-drip-sender-check {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #eaf5fb;
+  color: #3286c8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#landlinq-home .ll-drip-audience-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+#landlinq-home .ll-drip-fullscreen .ll-drip-audience { display: flex; min-height: 86px; flex-direction: column; justify-content: center; gap: 6px; border: 1px solid #e1e9ee; border-radius: 6px; background: #fbfdfe; padding: 12px; }
+#landlinq-home .ll-drip-fullscreen .ll-drip-audience b { color: #304d60; font-size: 12px; }
+#landlinq-home .ll-drip-fullscreen .ll-drip-audience span { color: #80929e; font-size: 10px; }
+#landlinq-home .ll-drip-fullscreen .ll-drip-audience strong { color: #3286c8; font-size: 10px; }
+
+#landlinq-home .ll-drip-fullscreen .ll-drip-email-steps { display: grid; flex: 1; min-height: 0; grid-template-columns: 1fr; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 9px; }
+#landlinq-home .ll-drip-fullscreen .ll-drip-email-steps article { display: flex; min-height: 0; flex-direction: column; justify-content: space-between; gap: 6px; border: 1px solid #e1e9ee; border-radius: 6px; background: #fbfdfe; padding: 10px 12px; }
+#landlinq-home .ll-drip-email-steps article > div { display: flex; align-items: center; gap: 8px; }
+#landlinq-home .ll-drip-email-steps article > div b { color: #3286c8; font-size: 9px; }
+#landlinq-home .ll-drip-email-steps article > div span { color: #81929e; font-size: 9px; }
+#landlinq-home .ll-drip-email-steps article label { display: flex; align-items: center; gap: 8px; color: #718493; font-size: 9px; }
+#landlinq-home .ll-drip-email-steps article input { min-width: 0; flex: 1; border: 1px solid #dce5eb; border-radius: 4px; background: white; padding: 6px 8px; color: #304d60; font: inherit; }
+#landlinq-home .ll-drip-email-steps article > strong { color: #536b7b; font-size: 9px; font-weight: 600; }
+#landlinq-home .ll-drip-email-steps article p { margin: 0; color: #718493; font-size: 9px; line-height: 1.5; }
+#landlinq-home .ll-drip-add-step { border: 1px solid #dce5eb; border-radius: 5px; background: #fff; padding: 7px 10px; color: #3286c8; font-size: 10px; font-weight: 600; }
+#landlinq-home .ll-drip-setting-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #edf1f3; padding: 10px 0; font-size: 10px; }
+#landlinq-home .ll-drip-setting-row span { color: #718493; }
+#landlinq-home .ll-drip-setting-row b { color: #304d60; font-weight: 600; text-align: right; }
+#landlinq-home .ll-drip-setting-row b.ll-drip-on { color: #20845c; }
+#landlinq-home .ll-drip-sender { display: flex; align-items: center; gap: 10px; border: 1px solid #e1e9ee; border-radius: 6px; padding: 10px; }
+#landlinq-home .ll-drip-sender > i { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; background: #3286c8; color: white; font-size: 10px; font-style: normal; font-weight: 700; }
+#landlinq-home .ll-drip-sender > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+#landlinq-home .ll-drip-sender b { color: #304d60; font-size: 10px; }
+#landlinq-home .ll-drip-sender small { overflow: hidden; color: #81929e; font-size: 9px; text-overflow: ellipsis; }
+#landlinq-home .ll-drip-sender > strong { color: #20845c; font-size: 9px; }
+#landlinq-home .ll-drip-launch-panel { display: flex; flex: 1; min-height: 100px; flex-direction: column; justify-content: center; gap: 10px; border: 1px solid #c9e3d4; border-radius: 8px; background: #f4fbf7; padding: 16px; }
+#landlinq-home .ll-drip-launch-panel > div { display: flex; flex-direction: column; gap: 4px; }
+#landlinq-home .ll-drip-launch-panel > div b { color: #254a38; font-size: 12px; }
+#landlinq-home .ll-drip-launch-panel > div span,
+#landlinq-home .ll-drip-launch-panel > small { color: #73877d; font-size: 9px; }
+#landlinq-home .ll-drip-fullscreen .ll-drip-launch { display: flex; align-items: center; justify-content: center; gap: 10px; border: 0; border-radius: 5px; background: #20845c; padding: 12px; color: white; font-size: 11px; font-weight: 700; }
+#landlinq-home .ll-drip-window-foot { margin-top: auto; border-top: 1px solid #dce5eb; background: white; padding: 9px 20px; font-size: 9px; }
+
+#landlinq-home .ll-yoc-results { padding: 10px; }
+#landlinq-home .ll-yoc-results-head > span { font-size: 7px; }
+#landlinq-home .ll-yoc-primary-result { margin-top: 8px; font-size: 26px; }
+#landlinq-home .ll-yoc-target { margin: 6px 0; padding: 5px; font-size: 8px; }
+#landlinq-home .ll-yoc-result-line { gap: 5px; padding: 5px 0; font-size: 8px; }
+#landlinq-home .ll-yoc-result-line b { font-size: 8px; white-space: nowrap; }
+#landlinq-home .ll-yoc-result-foot { margin-top: 6px; font-size: 7px; }
+#landlinq-home .ll-yoc-sensitivity { margin-top: 8px; border: 1px solid #dce9e1; border-radius: 5px; background: white; padding: 6px; }
+#landlinq-home .ll-yoc-sensitivity > b { display: block; margin-bottom: 5px; color: #506c5e; font-size: 8px; }
+#landlinq-home .ll-yoc-sensitivity > div { display: grid; grid-template-columns: 1.2fr repeat(3, .7fr); gap: 3px; border-top: 1px solid #edf1f3; padding: 4px 0; color: #6d8177; font-size: 7px; text-align: right; }
+#landlinq-home .ll-yoc-sensitivity > div > :first-child { text-align: left; }
+#landlinq-home .ll-yoc-sensitivity b { color: #2f7254; font-size: 7px; }
+
+#landlinq-home .ll-analytics-bars { display: flex; height: 95px; align-items: end; gap: 8px; margin-top: 14px; border-bottom: 1px solid #dce5eb; padding: 0 5px; }
+#landlinq-home .ll-analytics-page { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+#landlinq-home .ll-analytics-overview { flex: 1; min-height: 0; grid-template-rows: repeat(2, minmax(0, 1fr)); }
+#landlinq-home .ll-analytics-overview > .rounded-2xl { display: flex; min-height: 0; flex-direction: column; overflow: hidden; }
+#landlinq-home .ll-analytics-overview > .rounded-2xl > div:last-child { min-height: 0; }
+#landlinq-home .ll-analytics-bars i { flex: 1; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #68b9e5, #3286c8); }
+#landlinq-home .ll-analytics-bar-labels { display: flex; justify-content: space-between; margin-top: 5px; color: #8495a1; font-size: 8px; }
+#landlinq-home .ll-analytics-outreach-row { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto; gap: 5px; margin-top: 12px; border-top: 1px solid #e5ecef; padding-top: 10px; font-size: 8px; }
+#landlinq-home .ll-analytics-outreach-row span { color: #718493; }
+#landlinq-home .ll-analytics-outreach-row b { color: #304d60; }
+#landlinq-home .ll-analytics-market-list,
+#landlinq-home .ll-analytics-leaderboard { padding: 0 18px 14px; }
+#landlinq-home .ll-analytics-market-list > div { display: grid; grid-template-columns: 1.2fr 1fr 28px; align-items: center; gap: 12px; border-bottom: 1px solid #edf1f3; padding: 10px 0; }
+#landlinq-home .ll-analytics-market-list > div > span { display: flex; flex-direction: column; gap: 3px; }
+#landlinq-home .ll-analytics-market-list b { color: #304d60; font-size: 10px; }
+#landlinq-home .ll-analytics-market-list small { color: #81929e; font-size: 8px; }
+#landlinq-home .ll-analytics-market-list i { height: 7px; overflow: hidden; border-radius: 99px; background: #edf2f5; }
+#landlinq-home .ll-analytics-market-list em { display: block; height: 100%; border-radius: inherit; background: #5ba5d5; }
+#landlinq-home .ll-analytics-market-list strong { color: #536b7b; font-size: 9px; }
+#landlinq-home .ll-analytics-leaderboard > div { display: grid; grid-template-columns: 24px minmax(0, 1fr) 70px 65px; align-items: center; gap: 8px; border-bottom: 1px solid #edf1f3; padding: 12px 0; font-size: 9px; }
+#landlinq-home .ll-analytics-rank { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: #eaf5fb; color: #3286c8; font-weight: 700; }
+#landlinq-home .ll-analytics-leaderboard b { color: #304d60; }
+#landlinq-home .ll-analytics-leaderboard > div > span:nth-child(3) { color: #718493; }
+#landlinq-home .ll-analytics-leaderboard strong { color: #304d60; text-align: right; }
+
+#landlinq-home .ll-sales-pipeline-layout { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+#landlinq-home .ll-sales-pipeline-lanes { display: grid; flex: 1; min-height: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+#landlinq-home .ll-sales-pipeline-lane { min-width: 0; min-height: 0; overflow: auto; }
+#landlinq-home .ll-sales-pipeline-lane .space-y-3 > * + * { margin-top: 8px; }
+#landlinq-home .ll-sales-pipeline-lane .relative.rounded-lg { padding: 10px; }
+#landlinq-home .ll-mock-window-content [data-testid="demo-sales-contacts"] .ll-mock-window-content { min-width: 0; }
+#landlinq-home .ll-mock-window-content [data-testid="demo-sales-contacts"] .overflow-hidden.rounded-lg { min-width: 0; }
+#landlinq-home .ll-sales-contacts-canvas { display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; }
+
+@media (max-width: 768px) {
+  #landlinq-home .ll-drip-fullscreen .ll-drip-content { grid-template-columns: minmax(0, 1.3fr) minmax(260px, .9fr); padding: 10px; }
+  #landlinq-home .ll-drip-fullscreen .ll-drip-panel { padding: 10px; }
+  #landlinq-home .ll-drip-email-steps article { grid-template-columns: 1fr; }
+  #landlinq-home .ll-drip-email-steps article > strong { grid-column: 1; }
+  #landlinq-home .ll-partner-crm-layout { grid-template-columns: minmax(0, 1fr) 220px; }
+}
+
+@media (max-width: 500px) {
+  #landlinq-home .ll-drip-fullscreen .ll-drip-content { grid-template-columns: minmax(0, 1.1fr) minmax(230px, .9fr); gap: 7px; padding: 7px; }
+  #landlinq-home .ll-drip-fullscreen .ll-drip-head { padding: 9px; }
+  #landlinq-home .ll-drip-fullscreen .ll-drip-tabs { padding: 5px; }
+  #landlinq-home .ll-drip-fullscreen .ll-drip-tabs button { padding: 4px; }
+  #landlinq-home .ll-drip-audience-grid { grid-template-columns: 1fr; }
+  #landlinq-home .ll-analytics-market-list > div { gap: 5px; }
+  #landlinq-home .ll-analytics-leaderboard > div { grid-template-columns: 20px minmax(0, 1fr) 50px 50px; gap: 5px; }
+  #landlinq-home .ll-sales-pipeline-lanes { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+  #landlinq-home .ll-sales-pipeline-lane { padding: 5px; }
+}
+
+/* Audience-specific story and workflow preview inside the homepage demo section. */
+#landlinq-home #demo .ll-demo-story {
+  margin: 0 0 clamp(4rem, 8vw, 7.5rem);
+  animation: ll-story-arrive 440ms cubic-bezier(.2,.7,.25,1) both;
+}
+
+#landlinq-home #demo .ll-demo-story__context {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.12fr;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+#landlinq-home #demo .ll-demo-story__note,
+#landlinq-home #demo .ll-demo-story__data {
+  min-width: 0;
+  border: 1px solid rgb(184 196 207 / .54) !important;
+  border-radius: 1rem;
+  background: #f7fafb;
+  padding: clamp(1.1rem, 2.4vw, 1.65rem);
+}
+
+#landlinq-home #demo .ll-demo-story__note--outcome {
+  background: #edf6fa;
+}
+
+#landlinq-home #demo .ll-demo-story__label {
+  display: block;
+  color: #3286c8 !important;
+  font-family: var(--ll-font-body);
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .16em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+#landlinq-home #demo .ll-demo-story__note p {
+  margin: .7rem 0 0;
+  color: #34495a !important;
+  font-size: .92rem;
+  line-height: 1.65;
+}
+
+#landlinq-home #demo .ll-demo-story__data {
+  position: relative;
+  overflow: hidden;
+  background: #0d2538;
+  border-color: #0d2538 !important;
+}
+
+#landlinq-home #demo .ll-demo-story__data::after {
+  position: absolute;
+  right: -1.1rem;
+  bottom: -2.7rem;
+  width: 8rem;
+  height: 8rem;
+  border: 1px solid rgb(110 190 219 / .25);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1rem rgb(110 190 219 / .05), 0 0 0 2rem rgb(110 190 219 / .035);
+  content: "";
+  pointer-events: none;
+}
+
+#landlinq-home #demo .ll-demo-story__data .ll-demo-story__label {
+  margin-bottom: .6rem;
+  color: #91d8e9 !important;
+  letter-spacing: .12em;
+}
+
+#landlinq-home #demo .ll-demo-story__data-item {
+  display: block;
+  position: relative;
+  z-index: 1;
+  padding: .25rem 0;
+  color: #f4f8fa !important;
+  font-size: .86rem;
+  font-weight: 600;
+}
+
+#landlinq-home #demo .ll-demo-story__data-item:last-child {
+  color: #9dc8d3 !important;
+  font-size: .76rem;
+  font-weight: 500;
+}
+
+#landlinq-home #demo .ll-workflow-preview {
+  margin-top: 1.1rem;
+  overflow: hidden;
+  border: 1px solid rgb(184 196 207 / .6) !important;
+  border-radius: 1.2rem;
+  background: linear-gradient(135deg, #f1f7f9 0%, #f8fbfc 70%);
+  padding: clamp(1.2rem, 3vw, 2rem);
+}
+
+#landlinq-home #demo .ll-workflow-preview__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+#landlinq-home #demo .ll-workflow-preview__heading p {
+  margin: .38rem 0 0;
+  color: #0d2538 !important;
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  font-weight: 650;
+  letter-spacing: -.025em;
+}
+
+#landlinq-home #demo .ll-workflow-preview__track {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.55rem;
+}
+
+#landlinq-home #demo .ll-workflow-preview__step {
+  display: flex;
+  position: relative;
+  min-width: 0;
+  min-height: 5.25rem;
+  align-items: center;
+  gap: .85rem;
+  border: 1px solid #d9e5e9 !important;
+  border-radius: .85rem;
+  background: rgb(255 255 255 / .88);
+  padding: .9rem;
+  animation: ll-step-arrive 480ms cubic-bezier(.2,.7,.25,1) both;
+  animation-delay: calc(var(--step-index, 0) * 95ms);
+}
+
+#landlinq-home #demo .ll-workflow-preview__number {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  place-items: center;
+  border-radius: .65rem;
+  background: #dff1f5;
+  color: #287894 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .7rem;
+  font-weight: 700;
+}
+
+#landlinq-home #demo .ll-workflow-preview__step strong,
+#landlinq-home #demo .ll-workflow-preview__step small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#landlinq-home #demo .ll-workflow-preview__step strong {
+  color: #17364a !important;
+  font-size: .85rem;
+  font-weight: 700;
+}
+
+#landlinq-home #demo .ll-workflow-preview__step small {
+  margin-top: .18rem;
+  color: #71838c !important;
+  font-size: .7rem;
+  line-height: 1.4;
+}
+
+#landlinq-home #demo .ll-workflow-preview__connector {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: -.96rem;
+  width: .95rem;
+  height: 1px;
+  background: #9fc4ce;
+}
+
+#landlinq-home #demo .ll-workflow-preview__connector i {
+  display: block;
+  width: .28rem;
+  height: .28rem;
+  margin-top: -.1rem;
+  border-radius: 50%;
+  background: #3286c8;
+  animation: ll-flow-pulse 1.9s ease-in-out infinite;
+}
+
+#landlinq-home #demo .ll-demo-story__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.25rem;
+  margin-top: 1.2rem;
+}
+
+#landlinq-home #demo .ll-demo-story__contact {
+  display: inline-flex;
+  min-height: 2.9rem;
+  align-items: center;
+  justify-content: center;
+  gap: .65rem;
+  border-radius: 99px;
+  padding: .7rem 1.15rem;
+  font-size: .84rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform 180ms ease;
+}
+
+#landlinq-home #demo .ll-demo-story__contact {
+  border: 1px solid transparent !important;
+  background: transparent;
+  color: #1c617f !important;
+}
+
+#landlinq-home #demo .ll-demo-story__contact:hover {
+  transform: translateY(-2px);
+}
+
+#landlinq-home #demo .ll-demo-story__contact:hover {
+  background: #e7f3f6;
+}
+
+#landlinq-home #demo .ll-demo-story__contact:focus-visible {
+  outline: 3px solid #59a7cb;
+  outline-offset: 3px;
+}
+
+@keyframes ll-story-arrive {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ll-step-arrive {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ll-flow-pulse {
+  0%, 100% { opacity: .45; transform: translateX(0); }
+  50% { opacity: 1; transform: translateX(.55rem); }
+}
+
+@media (max-width: 760px) {
+  #landlinq-home #demo .ll-demo-story__context {
+    grid-template-columns: 1fr;
+    gap: .7rem;
+  }
+
+  #landlinq-home #demo .ll-demo-story__note,
+  #landlinq-home #demo .ll-demo-story__data {
+    padding: 1.05rem 1.15rem;
+  }
+
+  #landlinq-home #demo .ll-workflow-preview__track {
+    grid-template-columns: 1fr;
+    gap: .65rem;
+    margin-top: 1.1rem;
+  }
+
+  #landlinq-home #demo .ll-workflow-preview__step {
+    min-height: 4.4rem;
+  }
+
+  #landlinq-home #demo .ll-workflow-preview__connector {
+    top: auto;
+    right: auto;
+    bottom: -.66rem;
+    left: 1.86rem;
+    width: 1px;
+    height: .65rem;
+  }
+
+  #landlinq-home #demo .ll-workflow-preview__connector i {
+    margin: 0 0 0 -.1rem;
+    animation-name: ll-flow-pulse-vertical;
+  }
+}
+
+@keyframes ll-flow-pulse-vertical {
+  0%, 100% { opacity: .45; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(.35rem); }
+}
+
+@media (max-width: 420px) {
+  #landlinq-home #demo .ll-workflow-preview__heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #landlinq-home #demo .ll-demo-story,
+  #landlinq-home #demo .ll-workflow-preview__step,
+  #landlinq-home #demo .ll-workflow-preview__connector i {
+    animation: none !important;
+  }
+
+  #landlinq-home #demo .ll-demo-story__contact {
+    transition: none !important;
+  }
+}
+
+/* The scaled demo remains swipe-scrollable on narrow screens without browser scrollbars. */
+#landlinq-home .ll-demo-scale-viewport {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+#landlinq-home .ll-demo-scale-viewport::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+#landlinq-home .ll-mock-window,
+#landlinq-home .ll-mock-window * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+#landlinq-home .ll-mock-window::-webkit-scrollbar,
+#landlinq-home .ll-mock-window *::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Keep one continuous frame edge. The mock browser window owns the only border. */
+#landlinq-home .ll-step-surface--demo {
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+#landlinq-home .ll-step-surface--demo .ll-mock-window {
+  border: 1px solid #dce5eb !important;
+  border-radius: 1rem !important;
+  overflow: hidden !important;
+}

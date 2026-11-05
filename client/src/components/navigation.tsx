@@ -1,0 +1,788 @@
+import { useAuth, UserRole } from "@/hooks/useAuth";
+import { DesktopPlatformMenu, DesktopSolutionsMenu, MobilePlatformGroup, MobileSolutionsGroup } from "@/components/marketing/solutions-navigation";
+import { Button } from "@/components/ui/button";
+import { Link, useLocation } from "wouter";
+import {
+  BarChart3,
+  Briefcase,
+  Building2,
+  ChevronDown,
+  CircleDot,
+  Contact,
+  Database,
+  FileSearch,
+  Home,
+  LayoutDashboard,
+  LineChart,
+  LogOut,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Send,
+  Settings,
+  Shield,
+  UserCog,
+  Users,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import { useState, useMemo, memo, useEffect } from "react";
+import { AuthModal } from "@/components/auth-modal";
+import { preloadRoute } from "@/lib/route-preload";
+import { isPlatformAdminEmail } from "@shared/admin-auth";
+import { BrandWordmark } from "@/components/brand-wordmark";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+const deallinqColorIcon = "/assets/deallinq-color-icon.png";
+
+const navIconFor = (name: string): LucideIcon => {
+  const normalized = name.toLowerCase();
+  if (normalized.includes("home") || normalized.includes("overview")) return Home;
+  if (normalized.includes("dashboard") || normalized === "deals" || normalized === "my deals") return LayoutDashboard;
+  if (normalized.includes("pipeline")) return LineChart;
+  if (normalized.includes("investment compan")) return Building2;
+  if (normalized.includes("data")) return Database;
+  if (normalized.includes("analytics")) return BarChart3;
+  if (normalized.includes("audit") || normalized.includes("reports")) return FileSearch;
+  if (normalized.includes("people") || normalized.includes("user")) return UserCog;
+  if (normalized.includes("broker") || normalized.includes("contact")) return Contact;
+  if (normalized.includes("crm")) return Users;
+  if (normalized.includes("outreach")) return Send;
+  if (normalized.includes("setup")) return Settings;
+  if (normalized.includes("process") || normalized.includes("criteria")) return Briefcase;
+  if (normalized.includes("developer")) return Shield;
+  return CircleDot;
+};
+
+function useAppSidebarOffset(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    document.body.dataset.appSidebar = "true";
+    return () => {
+      delete document.body.dataset.appSidebar;
+    };
+  }, [enabled]);
+}
+
+interface NavigationProps {
+  onOpenSlideForm?: () => void;
+  hideSubmitDeal?: boolean;
+}
+
+function PublicNavigation({ hideSubmitDeal = false }: Pick<NavigationProps, "hideSubmitDeal">) {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  return (
+    <nav className="sticky top-0 z-50 border-b border-white/10 bg-primary shadow-sm" aria-label="Public navigation">
+      <div className="mx-auto max-w-7xl px-5 sm:px-8 lg:px-10">
+        <div className="flex h-16 items-center justify-between">
+          <Link href="/" className="shrink-0" aria-label="DealLinq home">
+            <BrandWordmark inverse iconClassName="h-9 w-9" textClassName="text-[1.35rem]" dataTestId="public-logo-deallinq" />
+          </Link>
+
+          <div className="hidden items-center gap-2 lg:gap-3 md:flex">
+            <DesktopPlatformMenu />
+            <DesktopSolutionsMenu />
+            <Link href="/demo" className="rounded-full border border-[#3286C8] bg-[#3286C8] px-4 py-2 text-sm font-semibold text-white transition-all hover:border-[#3286C8] hover:bg-white hover:text-[#3286C8]">Book a demo</Link>
+            <Link href="/login" className="rounded-full border border-white bg-white px-4 py-2 text-sm font-semibold text-landlinq-blue transition-colors hover:border-white hover:bg-white hover:text-landlinq-blue">Log In</Link>
+          </div>
+
+          <button
+            type="button"
+            aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={isMobileMenuOpen}
+            onClick={() => setIsMobileMenuOpen((open) => !open)}
+            className="rounded-full p-2 text-white md:hidden"
+          >
+            {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
+
+        {isMobileMenuOpen && (
+          <div className="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-white/10 py-3 md:hidden">
+            <div className="flex flex-col gap-1 pb-2">
+              <MobilePlatformGroup onCloseMenu={() => setIsMobileMenuOpen(false)} />
+              <MobileSolutionsGroup onCloseMenu={() => setIsMobileMenuOpen(false)} />
+              <Link href="/demo" onClick={() => setIsMobileMenuOpen(false)} className="rounded-lg bg-[#3286C8] px-3 py-3 text-center text-sm font-semibold text-white hover:bg-white hover:text-[#3286C8]">Book a demo</Link>
+              <Link href="/login" onClick={() => setIsMobileMenuOpen(false)} className="mt-2 rounded-lg border border-white/25 px-3 py-3 text-center text-sm font-semibold text-white hover:bg-white hover:text-primary">Log In</Link>
+            </div>
+          </div>
+        )}
+      </div>
+    </nav>
+  );
+}
+
+function Navigation({ onOpenSlideForm, hideSubmitDeal = false }: NavigationProps) {
+  const { user, isAuthenticated, logout, userRole, hasPermission, isRole } = useAuth();
+  const [location] = useLocation();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isSidebarPinned, setIsSidebarPinned] = useState(false);
+  const [isSidebarHovering, setIsSidebarHovering] = useState(false);
+  useAppSidebarOffset(isAuthenticated);
+  const isSidebarExpanded = isSidebarPinned || isSidebarHovering;
+
+  const handleLogout = () => {
+    if (logout) {
+      logout();
+    }
+  };
+
+  // Memoized user email to prevent object reference changes
+  // FIX (Dec 15, 2025): Support both OIDC auth (user.claims.email) and traditional auth (user.email)
+  const userEmail = useMemo(() => (user as any)?.claims?.email || (user as any)?.email || '', [user]);
+  const isPlatformAdmin = isPlatformAdminEmail(userEmail);
+  
+  // Categorized navigation for dropdown menus
+  const { landlinqNav, publicNav } = useMemo(() => {
+    const landlinq: any[] = [];
+    const publicItems: any[] = [];
+    
+    // Public navigation (unauthenticated users)
+    if (!isAuthenticated) {
+      publicItems.push(
+        { name: "Home", href: "/", description: "Welcome to DealLinq" },
+               { name: "Company", href: "/company", description: "Meet the DealLinq team" },
+        { name: "Process", href: "/process", description: "Our deal evaluation process" },
+        { name: "Criteria", href: "/criteria", description: "What we look for in deals" },
+        { name: "Blogs", href: "https://deallinq.ai/blog", description: "Read our blog posts", external: true },
+        { name: "Developers", href: "/developer-network", description: "Register your acquisition criteria" },
+        { name: "Brokers", href: "/broker-network", description: "Join our partner broker program" },
+        { name: "Submit a Deal", href: "/submit-deal", description: "Submit a land deal" }
+      );
+      return { landlinqNav: landlinq, publicNav: publicItems };
+    }
+    
+    // LandLinq = Internal platform features
+    switch (userRole) {
+      case UserRole.SUPER_ADMIN:
+      case UserRole.ADMIN:
+        landlinq.push(
+          ...(isPlatformAdmin
+            ? [
+                { section: "Platform" },
+                { name: "Platform Overview", href: "/dashboard", description: "Parent view across all Investment Companies and developers" },
+                { name: "Master Pipeline", href: "/admin/master-pipeline", description: "View deal activity across every Investment Company" },
+                { name: "Investment Companies", href: "/admin/investment-companies", description: "Create company portals, criteria, and initial logins" },
+                { name: "Broker State Import", href: "/admin/broker-state-import", description: "Safely preview and promote the approved NC and TN broker workbooks" },
+                { section: "Data & Insights" },
+                { name: "Data Warehouse", href: "/data-hub", description: "Market intelligence, deal data, and broker analytics" },
+                { name: "Platform Analytics", href: "/analytics", description: "Platform performance metrics and operational charts" },
+                { name: "Company Analytics", href: "/admin/analytics", description: "Aggregated Investment Company deal and outreach analytics" },
+                { name: "Intake Audit", href: "/admin/intake-audit", description: "Audit email sourcing and extraction outcomes" },
+                { section: "Deal Operations" },
+                { name: "People", href: "/user-management", description: "Manage users and brokers" },
+                { section: "CRM & Outreach" },
+                { name: "CRM", href: "/crm", description: "Contact management & campaign outreach" },
+                { name: "Outreach Analytics", href: "/outreach-analytics", description: "Emails sent, open rates & sender health" },
+                { name: "Outreach Setup", href: "/outreach-onboarding", description: "Configure senders & campaigns" },
+              ]
+            : [
+                { name: "Deal Dashboard", href: "/dashboard", description: "Review and manage incoming deals" },
+                { name: "CRM", href: "/crm", description: "Contact management & campaign outreach" },
+                { name: "Outreach Analytics", href: "/outreach-analytics", description: "Emails sent, open rates & sender health" },
+                { name: "Outreach Setup", href: "/outreach-onboarding", description: "Configure senders & campaigns" },
+                { name: "Data Hub", href: "/data-hub", description: "Market intelligence, deal data, and broker analytics" },
+                { name: "Analytics", href: "/analytics", description: "Performance metrics & charts" },
+              ]
+          )
+        );
+        break;
+        
+      case UserRole.ANALYST:
+      case UserRole.DEVELOPER:
+      case UserRole.PARTNER:
+        landlinq.push(
+          { name: "Deal Dashboard", href: "/dashboard", description: "Deal queue and pending reviews" },
+          ...(
+            userRole === UserRole.DEVELOPER || userRole === UserRole.PARTNER
+              ? [{ name: "CRM", href: "/developer/crm", description: "Your company's contacts and outreach" }]
+              : (isPlatformAdmin || userEmail.toLowerCase().endsWith('@catalystcp.com'))
+                ? [{ name: "CRM", href: "/crm", description: "Contact management & campaign outreach" }]
+                : []
+          ),
+          ...(userRole === UserRole.DEVELOPER
+            ? []
+            : [{ name: "Data Hub", href: "/data-hub", description: "Market intelligence & insights" }]),
+          { name: "Analytics", href: "/analytics", description: "Performance metrics" },
+        );
+        // Show outreach features for specific users
+        if (userEmail === 'jack@catalystcp.com') {
+          landlinq.push(
+            { name: "Outreach Analytics", href: "/outreach-analytics", description: "Emails sent, open rates & sender health" }
+          );
+        }
+        // Developers can configure their company's outreach senders and campaigns.
+        // Keep the legacy email-sender access for non-developer accounts.
+        if (
+          userRole === UserRole.DEVELOPER ||
+          ['aj@catalystcp.com', 'ford@catalystcp.com', 'ted@catalystcp.com'].includes(userEmail.toLowerCase())
+        ) {
+          landlinq.push(
+            { name: "Outreach Setup", href: "/outreach-onboarding", description: "Connect your Outlook account" }
+          );
+        }
+        break;
+        
+      case UserRole.BROKER:
+        // Brokers see simplified navigation
+        landlinq.push(
+          { name: "My Deals", href: "/dashboard", description: "Overview of submitted deals" },
+          { name: "Submit Deal", href: "/submit-deal", description: "Submit new properties" },
+          { name: "Process", href: "/process", description: "Our deal evaluation process" }
+        );
+        // Show Outreach Setup for email senders (so they can connect their Outlook)
+        if (['aj@catalystcp.com', 'ford@catalystcp.com', 'ted@catalystcp.com'].includes(userEmail.toLowerCase())) {
+          landlinq.push(
+            { name: "Outreach Setup", href: "/outreach-onboarding", description: "Connect your Outlook account" }
+          );
+        }
+        break;
+        
+      case UserRole.DEMO:
+        // Demo users: no nav items — only the deal dashboard via the banner CTA
+        break;
+
+      case UserRole.VIEWER:
+        landlinq.push(
+          { name: "Deals", href: "/view-deals", description: "View deals" },
+          { name: "Reports", href: "/reports", description: "View reports" }
+        );
+        break;
+        
+      default:
+        landlinq.push(
+          { name: "Deals", href: "/dashboard", description: "Dashboard" }
+        );
+    }
+    
+    return {
+      landlinqNav: landlinq,
+      publicNav: publicItems,
+    };
+  }, [userRole, isAuthenticated, userEmail, isPlatformAdmin]);
+  
+  // Combined navigation for mobile menu
+  const navigation = useMemo(() => {
+    if (!isAuthenticated) return publicNav;
+    return landlinqNav;
+  }, [landlinqNav, publicNav, isAuthenticated]);
+
+  const navigationSections = useMemo(() => {
+    if (!isAuthenticated || landlinqNav.length === 0) return [];
+
+    const sections: { name: string; items: any[] }[] = [];
+    let currentSection: { name: string; items: any[] } | null = null;
+
+    landlinqNav.forEach((item: any) => {
+      if (item.section) {
+        currentSection = {
+            name: item.section === "Platform" && isPlatformAdmin ? "Platform" : item.section,
+          items: [],
+        };
+        sections.push(currentSection);
+        return;
+      }
+
+      if (!currentSection) {
+        currentSection = {
+          name: isPlatformAdmin ? "Platform" : "DealLinq",
+          items: [],
+        };
+        sections.push(currentSection);
+      }
+
+      currentSection.items.push(item);
+    });
+
+    return sections.filter((section) => section.items.length > 0);
+  }, [landlinqNav, isAuthenticated, isPlatformAdmin]);
+
+  if (!isAuthenticated) {
+    return <PublicNavigation hideSubmitDeal={hideSubmitDeal} />;
+  }
+
+  return (
+    <nav
+      className="relative sticky top-0 z-50 border-b border-slate-800 bg-[#081729] shadow-lg md:fixed md:inset-y-0 md:left-0 md:border-0 md:bg-transparent md:shadow-none"
+      aria-label="Application navigation"
+    >
+      <aside
+        className={`pointer-events-auto fixed inset-y-0 left-0 z-50 hidden flex-col border-r border-slate-700/80 bg-[#081729] shadow-xl transition-[width] duration-200 md:flex ${
+          isSidebarExpanded ? "w-64" : "w-[4.5rem]"
+        }`}
+        onMouseEnter={() => setIsSidebarHovering(true)}
+        onMouseLeave={() => setIsSidebarHovering(false)}
+        onFocusCapture={() => setIsSidebarHovering(true)}
+        aria-label="Application sidebar"
+      >
+        <div className={`relative flex h-20 items-center border-b border-white/10 ${isSidebarExpanded ? "justify-between px-4" : "justify-center px-2"}`}>
+          <Link href="/" className="flex min-w-0 items-center gap-2" aria-label="DealLinq home" title="DealLinq home">
+            {isSidebarExpanded ? (
+              <BrandWordmark inverse iconClassName="h-9 w-9" textClassName="text-xl" dataTestId="logo-deallinq" />
+            ) : (
+              <img
+                src={deallinqColorIcon}
+                alt="DealLinq"
+                className="h-8 w-8 object-contain"
+                data-testid="logo-deallinq"
+              />
+            )}
+          </Link>
+          {isSidebarExpanded && (
+            <button
+              type="button"
+              className="rounded-md p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+              onClick={() => setIsSidebarPinned((pinned) => !pinned)}
+              aria-label={isSidebarPinned ? "Collapse navigation sidebar" : "Keep navigation sidebar expanded"}
+              aria-expanded={isSidebarPinned}
+              data-testid="button-sidebar-toggle"
+            >
+              {isSidebarPinned ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+            </button>
+          )}
+          {!isSidebarExpanded && (
+            <button
+              type="button"
+              className="absolute bottom-1.5 right-1.5 rounded-md p-1 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+              onClick={() => setIsSidebarPinned(true)}
+              aria-label="Expand navigation sidebar"
+              title="Expand navigation sidebar"
+              data-testid="button-sidebar-toggle"
+            >
+              <PanelLeftOpen className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-4">
+          {isPlatformAdmin ? (
+            navigationSections.map((section) => (
+              <div key={section.name} className="mb-4">
+                {isSidebarExpanded ? (
+                  <div className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    {section.name}
+                  </div>
+                ) : (
+                  <div className="mx-2 mb-2 border-t border-slate-700/80" aria-hidden="true" />
+                )}
+                <div className="space-y-1">
+                  {section.items.map((item: any) => {
+                    const Icon = navIconFor(item.name);
+                    const isActive = location === item.href;
+                    return (
+                      <Link
+                        key={item.name}
+                        href={item.href}
+                        data-nav-item={item.href}
+                        className={`group flex items-center rounded-md py-2.5 text-sm font-medium transition-colors ${
+                          isSidebarExpanded ? "gap-3 px-3" : "justify-center px-2"
+                        } ${isActive ? "bg-white/10 text-cyan-300" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}
+                        onMouseEnter={() => preloadRoute(item.href)}
+                        onFocus={() => preloadRoute(item.href)}
+                        onTouchStart={() => preloadRoute(item.href)}
+                        data-testid={`nav-link-${item.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                        title={item.description}
+                        aria-label={item.name}
+                        aria-current={isActive ? "page" : undefined}
+                      >
+                        <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+                        <span className={isSidebarExpanded ? "truncate" : "sr-only"}>{item.name}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="space-y-1">
+              {landlinqNav.filter((item: any) => !item.section).map((item: any) => {
+                const Icon = navIconFor(item.name);
+                const isActive = location === item.href;
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    data-nav-item={item.href}
+                    className={`group flex items-center rounded-md py-2.5 text-sm font-medium transition-colors ${
+                      isSidebarExpanded ? "gap-3 px-3" : "justify-center px-2"
+                    } ${isActive ? "bg-white/10 text-cyan-300" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}
+                    onMouseEnter={() => preloadRoute(item.href)}
+                    onFocus={() => preloadRoute(item.href)}
+                    onTouchStart={() => preloadRoute(item.href)}
+                    data-testid={`nav-link-${item.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                    title={item.description}
+                    aria-label={item.name}
+                    aria-current={isActive ? "page" : undefined}
+                  >
+                    <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+                    <span className={isSidebarExpanded ? "truncate" : "sr-only"}>{item.name}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-white/10 p-2">
+          <Button
+            onClick={handleLogout}
+            data-testid="button-logout"
+            variant="white"
+            size="sm"
+            className={isSidebarExpanded ? "w-full justify-start gap-3 px-3" : "mx-auto flex w-10 justify-center px-0"}
+            title="Sign Out"
+            aria-label="Sign Out"
+          >
+            <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className={isSidebarExpanded ? "" : "sr-only"}>Sign Out</span>
+          </Button>
+        </div>
+      </aside>
+
+      <div className="relative max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 md:hidden">
+        <div className="flex items-center justify-between h-16 lg:h-20">
+          {/* Left side - Logo */}
+          <div className="flex items-center flex-shrink-0">
+            <Link href="/" className="flex items-center gap-1.5">
+              {isAuthenticated ? (
+                <BrandWordmark inverse iconClassName="h-9 w-9" textClassName="text-xl sm:text-2xl" dataTestId="logo-deallinq" />
+              ) : (
+                <BrandWordmark inverse iconClassName="h-9 w-9" textClassName="text-xl sm:text-2xl" dataTestId="logo-deallinq" />
+              )}
+            </Link>
+          </div>
+          
+          {/* Right side navigation */}
+          <div className="flex items-center">
+
+            {/* Desktop Navigation */}
+            <div className="hidden md:flex items-center space-x-2 lg:space-x-4 relative">
+            {/* Public navigation - flat links */}
+            {!isAuthenticated && publicNav.map((item: any) => {
+              const isActive = location === item.href;
+              const isSubmitButton = item.name.toLowerCase().includes('submit');
+              const isExternal = item.external === true;
+              
+              if (isSubmitButton && onOpenSlideForm) {
+                return (
+                  <Button
+                    key={item.name}
+                    onClick={onOpenSlideForm}
+                    className="bg-white text-[#3286C8] border-2 border-white hover:bg-white hover:text-[#3286C8] hover:border-white font-semibold transition-all duration-300"
+                    size="sm"
+                    data-testid={`nav-button-${item.name.toLowerCase().replace(/ /g, "-")}`}
+                    title={item.description}
+                  >
+                    {item.name}
+                  </Button>
+                );
+              } else if (isSubmitButton) {
+                return (
+                  <Link key={item.name} href={item.href}>
+                    <Button
+                      className="bg-white text-[#3286C8] border-2 border-white hover:bg-white hover:text-[#3286C8] hover:border-white font-semibold transition-all duration-300"
+                      size="sm"
+                      data-testid={`nav-button-${item.name.toLowerCase().replace(/ /g, "-")}`}
+                      title={item.description}
+                    >
+                      {item.name}
+                    </Button>
+                  </Link>
+                );
+              }
+              
+              if (isExternal) {
+                return (
+                  <a
+                    key={item.name}
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-2 px-2 lg:px-3 text-sm font-medium transition-colors relative rounded-md text-white hover:text-[#4A90E2]"
+                    data-testid={`nav-link-${item.name.toLowerCase().replace(/ /g, "-")}`}
+                    title={item.description}
+                  >
+                    {item.name}
+                  </a>
+                );
+              }
+              
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  data-nav-item={item.href}
+                  className={`py-2 px-2 lg:px-3 text-sm font-medium transition-colors relative rounded-md ${
+                    isActive
+                      ? "text-catalyst-gold"
+                      : "text-white hover:text-[#4A90E2]"
+                  }`}
+                  data-testid={`nav-link-${item.name.toLowerCase().replace(/ /g, "-")}`}
+                  title={item.description}
+                >
+                  {item.name}
+                </Link>
+              );
+            })}
+            
+            {/* Authenticated non-platform navigation - direct tabs across the header */}
+            {isAuthenticated && !isPlatformAdmin && landlinqNav.length > 0 && (
+              <div className="flex max-w-[calc(100vw-250px)] items-center gap-0.5 overflow-x-auto lg:gap-1">
+                {landlinqNav
+                  .filter((item: any) => !item.section)
+                  .map((item: any) => {
+                    const isActive = location === item.href;
+
+                    return (
+                      <Link
+                        key={item.name}
+                        href={item.href}
+                        data-nav-item={item.href}
+                        className={`whitespace-nowrap rounded-md px-1.5 py-2 text-xs font-medium transition-colors lg:px-2 lg:text-sm ${
+                          isActive
+                            ? "text-cyan-300"
+                            : "text-white hover:text-cyan-300"
+                        }`}
+                        onMouseEnter={() => preloadRoute(item.href)}
+                        onFocus={() => preloadRoute(item.href)}
+                        onTouchStart={() => preloadRoute(item.href)}
+                        data-testid={`nav-link-${item.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                        title={item.description}
+                      >
+                        {item.name}
+                      </Link>
+                    );
+                  })}
+              </div>
+            )}
+
+            {/* Authenticated platform navigation - one dropdown tab per section */}
+            {isAuthenticated && isPlatformAdmin && navigationSections.length > 0 && (
+              <div className="flex items-center gap-0.5 lg:gap-1">
+                {navigationSections.map((section) => {
+                  const hasActiveItem = section.items.some((item) => location === item.href);
+
+                  return (
+                    <DropdownMenu key={section.name}>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          className={`flex items-center gap-1 py-2 px-2 lg:px-3 text-xs lg:text-sm font-medium transition-colors rounded-md focus:outline-none ${
+                            hasActiveItem
+                              ? "text-cyan-300"
+                              : "text-white hover:text-cyan-300"
+                          }`}
+                          onMouseEnter={() => section.items.forEach((item) => preloadRoute(item.href))}
+                          onFocus={() => section.items.forEach((item) => preloadRoute(item.href))}
+                          data-testid={`nav-section-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                        >
+                          {section.name}
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-56 bg-white border-slate-200 shadow-lg">
+                        {section.items.map((item: any) => (
+                          <DropdownMenuItem
+                            key={item.name}
+                            asChild
+                            className="focus:bg-blue-100 hover:bg-blue-100 cursor-pointer"
+                          >
+                            <Link
+                              href={item.href}
+                              className="w-full text-slate-800 hover:text-blue-600"
+                              onMouseEnter={() => preloadRoute(item.href)}
+                              onFocus={() => preloadRoute(item.href)}
+                              onTouchStart={() => preloadRoute(item.href)}
+                            >
+                              {item.name}
+                            </Link>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  );
+                })}
+              </div>
+            )}
+            
+            {isAuthenticated ? (
+              <div className="flex items-center space-x-2 lg:space-x-4">
+                <Button
+                  onClick={handleLogout}
+                  data-testid="button-logout"
+                  variant="white"
+                  size="sm"
+                >
+                  <span className="hidden lg:inline">Sign Out</span>
+                  <span className="lg:hidden">Out</span>
+                </Button>
+              </div>
+            ) : (
+                <Button
+                  variant="white"
+                size="sm"
+                onClick={() => setIsAuthModalOpen(true)}
+                data-testid="button-auth"
+              >
+                <span className="hidden sm:inline">Sign In/Up</span>
+                <span className="sm:hidden">Auth</span>
+              </Button>
+            )}
+            </div>
+          </div>
+
+          {/* Mobile menu button */}
+          <div className="md:hidden flex items-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const nextOpen = !isMobileMenuOpen;
+                if (nextOpen) {
+                  navigation.forEach((item: any) => {
+                    if (item.href) preloadRoute(item.href);
+                  });
+                }
+                setIsMobileMenuOpen(nextOpen);
+              }}
+              data-testid="button-mobile-menu"
+            >
+              {isMobileMenuOpen ? (
+                <X className="h-6 w-6 text-slate-400" />
+              ) : (
+                <Menu className="h-6 w-6 text-slate-400" />
+              )}
+            </Button>
+          </div>
+        </div>
+
+        {/* Mobile Navigation */}
+        {isMobileMenuOpen && (
+          <div className="md:hidden border-t border-slate-700 py-4">
+            <div className="flex flex-col space-y-2 px-4">
+              {navigation.map((item: any) => {
+                if (item.section) {
+                  return (
+                    <div
+                      key={item.section}
+                      className="pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-500"
+                    >
+                      {item.section}
+                    </div>
+                  );
+                }
+
+                const isActive = location === item.href;
+                const isSubmitButton = item.name.toLowerCase().includes('submit');
+                const isExternal = item.external === true;
+                
+                if (isSubmitButton && onOpenSlideForm) {
+                  return (
+                    <Button
+                      key={item.name}
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        onOpenSlideForm();
+                      }}
+                      className="w-full bg-white text-[#3286C8] border-2 border-white hover:bg-white hover:text-[#3286C8] hover:border-white font-semibold transition-all duration-300"
+                      data-testid={`mobile-nav-button-${item.name.toLowerCase().replace(/ /g, "-")}`}
+                    >
+                      {item.name}
+                    </Button>
+                  );
+                } else if (isSubmitButton) {
+                  return (
+                    <Link key={item.name} href={item.href} className="w-full">
+                      <Button
+                        className="w-full bg-white text-[#3286C8] border-2 border-white hover:bg-white hover:text-[#3286C8] hover:border-white font-semibold transition-all duration-300"
+                        data-testid={`mobile-nav-button-${item.name.toLowerCase().replace(/ /g, "-")}`}
+                        onClick={() => setIsMobileMenuOpen(false)}
+                      >
+                        {item.name}
+                      </Button>
+                    </Link>
+                  );
+                }
+                
+                // Handle external links with regular anchor tag
+                if (isExternal) {
+                  return (
+                    <a
+                      key={item.name}
+                      href={item.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full text-center px-4 py-3 rounded-lg text-sm font-medium transition-colors text-slate-300 hover:text-cyan-300"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      data-testid={`mobile-nav-link-${item.name.toLowerCase().replace(/ /g, "-")}`}
+                    >
+                      {item.name}
+                    </a>
+                  );
+                }
+                
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    className={`w-full text-center px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                      isActive
+                        ? "text-white"
+                        : "text-slate-300 hover:text-white"
+                    }`}
+                      onMouseEnter={() => preloadRoute(item.href)}
+                      onFocus={() => preloadRoute(item.href)}
+                      onTouchStart={() => preloadRoute(item.href)}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    data-testid={`mobile-nav-link-${item.name.toLowerCase().replace(/ /g, "-")}`}
+                  >
+                    {item.name}
+                  </Link>
+                );
+              })}
+              <div className="w-full pt-4 border-t border-slate-700">
+                {isAuthenticated ? (
+                  <div className="space-y-3">
+                    <Button
+                      variant="white"
+                      onClick={handleLogout}
+                      className="w-full"
+                      data-testid="mobile-button-logout"
+                    >
+                      Sign Out
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="white"
+                    className="w-full"
+                    data-testid="mobile-button-auth"
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      setIsAuthModalOpen(true);
+                    }}
+                  >
+                    Sign In/Up
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      
+      <AuthModal 
+        isOpen={isAuthModalOpen} 
+        onClose={() => setIsAuthModalOpen(false)} 
+      />
+    </nav>
+  );
+}
+
+export default memo(Navigation);

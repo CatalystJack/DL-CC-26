@@ -1,0 +1,401 @@
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { format } from "date-fns";
+import { AlertCircle, ChevronDown, ChevronUp, FileText, Mail, Pencil, Save, Search, XCircle } from "lucide-react";
+import Navigation from "@/components/navigation";
+import Footer from "@/components/footer";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { isPlatformAdminEmail } from "@shared/admin-auth";
+
+type UnknownRecord = Record<string, any>;
+interface AuditResponse { items: UnknownRecord[]; total: number; page: number; limit: number; }
+
+const text = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "object") return Array.isArray(value) ? value.join(", ") : JSON.stringify(value);
+  return String(value);
+};
+
+// Email markup is deliberately converted to text, rather than rendered, so an
+// inbound email can never execute markup in the audit interface.
+const readableEmail = (value: unknown) => {
+  const source = String(value || "");
+  if (!source) return "No email body was retained.";
+  const doc = new DOMParser().parseFromString(source, "text/html");
+  return (doc.body.textContent || source).replace(/\n[ \t]*\n[ \t]*/g, "\n\n").trim();
+};
+
+const dateText = (value: unknown) => {
+  try { return value ? format(new Date(String(value)), "MMM d, yyyy p") : "—"; } catch { return text(value); }
+};
+
+const editableFields = [
+  { key: "propertyName", source: "parsedPropertyName", label: "Property name", maxLength: 300 },
+  { key: "address", source: "parsedAddress", label: "Address", maxLength: 300 },
+  { key: "city", source: "parsedCity", label: "City", maxLength: 200 },
+  { key: "state", source: "parsedState", label: "State", maxLength: 100 },
+  { key: "zip", source: "parsedZip", label: "ZIP code", maxLength: 40 },
+  { key: "parcelId", source: "parsedParcelId", label: "Parcel ID", maxLength: 200 },
+  { key: "acres", source: "parsedAcres", label: "Acres", numeric: true, step: "0.0001" },
+  { key: "price", source: "parsedPrice", label: "Asking price", numeric: true, step: "1" },
+  { key: "unitCount", source: "parsedUnitCount", label: "Unit count", numeric: true, step: "1" },
+  { key: "vintage", source: "parsedVintage", label: "Year built", numeric: true, step: "1" },
+  { key: "brokerName", source: "parsedBrokerName", label: "Broker name", maxLength: 200 },
+  { key: "brokerEmail", source: "parsedBrokerEmail", label: "Broker email", maxLength: 320, inputType: "email" },
+  { key: "brokerPhone", source: "parsedBrokerPhone", label: "Broker phone", maxLength: 64 },
+  { key: "zoning", source: "parsedZoning", label: "Zoning", maxLength: 500 },
+  { key: "notes", source: "parsedNotes", label: "Analyst notes", multiline: true },
+] as const;
+
+function ComparisonTable({ comparisons }: { comparisons: any }) {
+  const entries: [string, any][] = Array.isArray(comparisons)
+    ? comparisons.map((item: any) => [item.field || item.key || "Field", item])
+    : Object.entries(comparisons || {});
+  if (!entries.length) return <p className="text-sm text-muted-foreground">No extracted-to-final comparison was recorded.</p>;
+  return (
+    <div className="table-scroll-container rounded-md border">
+      <table className="w-full min-w-[520px] text-sm">
+        <thead className="bg-muted/50 text-left"><tr><th className="p-2">Field</th><th className="p-2">Extracted</th><th className="p-2">Final deal value</th></tr></thead>
+        <tbody>
+          {entries.map(([field, value]) => {
+            const row = typeof value === "object" && value !== null ? value : { extracted: value };
+             const extracted = row.extracted ?? row.parsed ?? row.intake ?? row.intakeValue ?? row.source;
+             const finalValue = row.final ?? row.deal ?? row.dealValue ?? row.value ?? row.destination;
+            const mismatch = row.mismatch === true || row.matches === false ||
+              (extracted !== undefined && finalValue !== undefined && text(extracted) !== text(finalValue));
+            return <tr key={field} className={mismatch ? "bg-amber-50 text-amber-950" : "border-t"}><td className="p-2 font-medium">{field}{mismatch && <Badge className="ml-2 bg-amber-200 text-amber-900 hover:bg-amber-200">Mismatch</Badge>}</td><td className="p-2 whitespace-pre-wrap">{text(extracted)}</td><td className="p-2 whitespace-pre-wrap">{text(finalValue)}</td></tr>;
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AuditItem({ item }: { item: UnknownRecord }) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const dealId = item.dealId || item.deal?.id || item.resultingDealId;
+   const { data: detail, isLoading } = useQuery<UnknownRecord>({
+    queryKey: ["/api/admin/intake-audit/deals", dealId],
+    queryFn: async () => {
+      const response = await fetch(`/api/admin/intake-audit/deals/${dealId}`, { credentials: "include" });
+      if (response.status === 404) return {};
+      if (!response.ok) throw new Error("Unable to load intake audit detail");
+      return response.json();
+    },
+     enabled: open && !!dealId,
+  });
+   const intake = detail?.intake || item.intake || item;
+  const deal = detail?.deal || item.deal || {};
+  const attachments = intake.attachments || intake.attachmentNames || [];
+  const attachmentList = Array.isArray(attachments) ? attachments : [];
+  const status = item.status || intake.status || "unknown";
+  const savedOverrides = item.analystOverrides && typeof item.analystOverrides === "object"
+    ? item.analystOverrides as UnknownRecord
+    : {};
+  const hasSavedEdits = Object.keys(savedOverrides).length > 0;
+  const pending = status === "pending";
+
+  const saveMutation = useMutation({
+    mutationFn: async (overrides: UnknownRecord) => {
+      const response = await fetch(`/api/admin/intake-audit/${item.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ overrides }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "Unable to save edits");
+      return result;
+    },
+    onSuccess: () => {
+      setEditing(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/intake-audit"] });
+      toast({ title: "Edits saved", description: "The intake remains pending and has not been approved." });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not save edits",
+      description: error.message,
+      variant: "destructive",
+    }),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/admin/intake-audit/${item.id}/reject`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "Unable to reject intake record");
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/intake-audit"] });
+      toast({ title: "Intake record rejected", description: "The record remains available in the audit history." });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not reject record",
+      description: error.message,
+      variant: "destructive",
+    }),
+  });
+
+  const startEditing = () => {
+    const values: Record<string, string> = {};
+    for (const field of editableFields) {
+      const value = Object.prototype.hasOwnProperty.call(savedOverrides, field.key)
+        ? savedOverrides[field.key]
+        : item[field.source];
+      values[field.key] = value == null ? "" : String(value);
+    }
+    setDraft(values);
+    setEditing(true);
+  };
+
+  const makeOverrides = () => {
+    const overrides: UnknownRecord = {};
+    for (const field of editableFields) {
+      const value = draft[field.key] ?? "";
+      const original = item[field.source];
+      if ("numeric" in field && field.numeric) {
+        const normalized = value.trim() === "" ? null : Number(value);
+        const originalNumber = original == null || original === "" ? null : Number(original);
+        if (normalized !== originalNumber) overrides[field.key] = normalized;
+      } else if (value !== String(original ?? "")) {
+        overrides[field.key] = value;
+      }
+    }
+    return overrides;
+  };
+
+  return <Card className="overflow-hidden">
+    <CardContent className="p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2"><Badge variant="secondary">{text(status)}</Badge>{hasSavedEdits && <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">Edits saved</Badge>}<span className="text-xs text-muted-foreground">{dateText(item.createdAt || intake.createdAt)}</span></div>
+          <h2 className="mt-2 font-semibold text-catalyst-navy">{text(intake.subject || item.subject || deal.address || item.address)}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">From {text(intake.fromEmail || intake.sender || item.fromEmail)} · {text(deal.address || item.address || intake.parsedAddress)}</p>
+           <p className="mt-2 text-sm"><span className="font-medium">Source:</span> {text(intake.routingReason || item.routingReason || intake.channel || "Email intake")} {(intake.overallConfidence ?? intake.confidence) != null && <> · <span className="font-medium">Confidence:</span> {text(intake.overallConfidence ?? intake.confidence)}</>}</p>
+        </div>
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
+          {dealId && <Link href={`/deals/${dealId}`}><Button size="sm" variant="outline">View deal</Button></Link>}
+          {pending && <>
+            <Button size="sm" variant="outline" onClick={() => editing ? setEditing(false) : startEditing()} disabled={saveMutation.isPending || rejectMutation.isPending}>
+              <Pencil className="mr-1 h-4 w-4" />{editing ? "Cancel edit" : "Edit fields"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-red-300 text-red-700 hover:bg-red-50"
+              disabled={rejectMutation.isPending || saveMutation.isPending}
+              onClick={() => {
+                if (window.confirm("Reject this intake record? It will remain in audit history and will not create a deal.")) {
+                  rejectMutation.mutate();
+                }
+              }}
+            >
+              <XCircle className="mr-1 h-4 w-4" />{rejectMutation.isPending ? "Rejecting…" : "Reject"}
+            </Button>
+          </>}
+          <Button size="sm" variant="outline" onClick={() => setOpen(!open)}>{open ? <ChevronUp className="mr-1 h-4 w-4" /> : <ChevronDown className="mr-1 h-4 w-4" />}{open ? "Hide" : "Audit"}</Button>
+        </div>
+      </div>
+      {editing && <form
+        className="mt-4 border-t pt-4"
+        onSubmit={event => {
+          event.preventDefault();
+          saveMutation.mutate(makeOverrides());
+        }}
+      >
+        <div className="mb-3">
+          <h3 className="font-medium">Edit extracted values</h3>
+          <p className="text-sm text-muted-foreground">Save corrections without approving this intake. Original AI values remain in the audit record.</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {editableFields.map(field => <label key={field.key} className={"multiline" in field && field.multiline ? "sm:col-span-2 lg:col-span-3" : "min-w-0"}>
+            <span className="mb-1 block text-sm font-medium">{field.label}</span>
+            {"multiline" in field && field.multiline
+              ? <Textarea
+                  className="min-h-24"
+                  value={draft[field.key] ?? ""}
+                  onChange={event => setDraft(current => ({ ...current, [field.key]: event.target.value }))}
+                  maxLength={5000}
+                />
+              : <Input
+                  type={"numeric" in field && field.numeric ? "number" : "inputType" in field ? field.inputType : "text"}
+                  min={"numeric" in field && field.numeric ? "0" : undefined}
+                  step={"numeric" in field && field.numeric ? field.step : undefined}
+                  value={draft[field.key] ?? ""}
+                  onChange={event => setDraft(current => ({ ...current, [field.key]: event.target.value }))}
+                  maxLength={"maxLength" in field ? field.maxLength : 500}
+                />}
+          </label>)}
+        </div>
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button type="button" variant="outline" onClick={() => setEditing(false)} disabled={saveMutation.isPending}>Cancel</Button>
+          <Button type="submit" className="border border-[#4A90E2] bg-[#4A90E2] text-white hover:border-[#4A90E2] hover:bg-white hover:text-[#4A90E2]" disabled={saveMutation.isPending || rejectMutation.isPending}>
+            <Save className="mr-2 h-4 w-4" />{saveMutation.isPending ? "Saving…" : "Save edits"}
+          </Button>
+        </div>
+      </form>}
+      {open && <div className="mt-4 space-y-5 border-t pt-4">
+        {isLoading ? <p className="text-sm text-muted-foreground">Loading intake record…</p> : <>
+           <div className="grid gap-3 text-sm sm:grid-cols-2"><div><span className="font-medium">Sender:</span> {text(intake.fromName ? `${intake.fromName} <${intake.fromEmail}>` : intake.fromEmail || intake.sender)}</div><div><span className="font-medium">Routing reason:</span> {text(intake.routingReason)}</div><div><span className="font-medium">Confidence:</span> {text(intake.overallConfidence ?? intake.confidence)}</div><div><span className="font-medium">Attachments:</span> {attachmentList.length ? attachmentList.map(text).join(", ") : text(intake.attachmentCount ? `${intake.attachmentCount} attachment(s)` : null)}</div></div>
+          {hasSavedEdits && <div><p className="mb-1 text-sm font-medium">Saved analyst edits</p><dl className="grid gap-2 rounded-md bg-blue-50 p-3 text-sm sm:grid-cols-2">{editableFields.filter(field => Object.prototype.hasOwnProperty.call(savedOverrides, field.key)).map(field => <div key={field.key}><dt className="text-muted-foreground">{field.label}</dt><dd className="whitespace-pre-wrap font-medium">{text(savedOverrides[field.key])}</dd></div>)}</dl></div>}
+          {intake.reviewNotes && <div><p className="mb-1 text-sm font-medium">Review notes</p><p className="whitespace-pre-wrap text-sm">{text(intake.reviewNotes)}</p></div>}
+          <div><p className="mb-1 flex items-center gap-1 text-sm font-medium"><Mail className="h-4 w-4" /> Full email body</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 font-sans text-sm">{readableEmail(intake.emailHtml || intake.html || intake.emailBody || intake.rawText || intake.body)}</pre></div>
+           <div><p className="mb-2 flex items-center gap-1 text-sm font-medium"><FileText className="h-4 w-4" /> Extracted versus final</p><ComparisonTable comparisons={detail?.comparisons || item.comparisons} /></div>
+        </>}
+      </div>}
+    </CardContent>
+  </Card>;
+}
+
+function EmailAutomationToggle() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const queryKey = ["/api/admin/email-automation-toggle"];
+  const { data, isLoading, isError } = useQuery<{ enabled: boolean }>({
+    queryKey,
+    queryFn: async () => {
+      const response = await fetch("/api/admin/email-automation-toggle", { credentials: "include" });
+      if (!response.ok) throw new Error("Unable to load email automation status");
+      return response.json();
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const response = await fetch("/api/admin/email-automation-toggle", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!response.ok) throw new Error("Unable to update email automation");
+      return response.json() as Promise<{ enabled: boolean }>;
+    },
+    onSuccess: ({ enabled }) => {
+      queryClient.setQueryData(queryKey, { enabled });
+      toast({
+        title: enabled ? "Email intake automation is ON" : "Email intake automation is OFF",
+        description: enabled
+          ? "New deal emails will be processed by automatic intake."
+          : "Automatic processing of new deal emails is disabled.",
+        variant: enabled ? "default" : "destructive",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Could not update email automation",
+        description: "The saved setting was not changed. Refresh and try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const enabled = data?.enabled === true;
+  const requestToggle = () => {
+    if (isLoading || isError || !data || toggleMutation.isPending) return;
+    const nextValue = !enabled;
+    if (nextValue && !window.confirm(
+      "Turn on automatic deal-email processing? Live emails sent to deals@deallinq.ai may be parsed and added to the deal intake queue.",
+    )) {
+      return;
+    }
+    toggleMutation.mutate(nextValue);
+  };
+
+  return (
+    <Card className={`mb-5 border-2 ${enabled ? "border-green-500/50 bg-green-50/50" : "border-slate-300 bg-white"}`}>
+      <CardContent className="p-4 sm:p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold text-catalyst-navy">Automatic email deal intake</h2>
+              {isLoading ? (
+                <Badge variant="secondary">Loading status</Badge>
+              ) : isError ? (
+                <Badge variant="destructive">Status unavailable</Badge>
+              ) : (
+                <Badge
+                  aria-live="polite"
+                  className={enabled ? "bg-green-700 text-white hover:bg-green-700" : "bg-slate-600 text-white hover:bg-slate-600"}
+                >
+                  {enabled ? "ON" : "OFF"}
+                </Badge>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {enabled
+                ? "Live deal emails are eligible for automatic processing."
+                : "Automatic processing is disabled. Incoming emails will not be converted into deals."}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              The IMAP poller reads this setting every 3 minutes; inbound email requests read it when received.
+              Changing the toggle does not require a server restart.
+            </p>
+            {isError && (
+              <p role="alert" className="text-sm text-red-700">
+                Could not load the saved status. The control is disabled to avoid changing an unknown state.
+              </p>
+            )}
+          </div>
+          <Button
+            type="button"
+            onClick={requestToggle}
+            disabled={isLoading || isError || !data || toggleMutation.isPending}
+            className={enabled
+              ? "w-full shrink-0 sm:w-auto"
+              : "w-full shrink-0 border border-[#4A90E2] bg-[#4A90E2] text-white hover:border-[#4A90E2] hover:bg-white hover:text-[#4A90E2] sm:w-auto"}
+            variant={enabled ? "destructive" : "default"}
+          >
+            {toggleMutation.isPending ? "Saving…" : enabled ? "Turn automation off" : "Turn automation on"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function IntakeAudit() {
+  const { user } = useAuth();
+  const [status, setStatus] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const email = String((user as any)?.claims?.email || (user as any)?.email || "");
+  const allowed = isPlatformAdminEmail(email);
+  const params = new URLSearchParams({ page: String(page), limit: "20" });
+  if (status) params.set("status", status); if (fromDate) params.set("fromDate", fromDate); if (toDate) params.set("toDate", toDate); if (appliedSearch) params.set("search", appliedSearch);
+  const { data, isLoading, isError } = useQuery<AuditResponse>({ queryKey: ["/api/admin/intake-audit", status, fromDate, toDate, appliedSearch, page], queryFn: async () => { const r = await fetch(`/api/admin/intake-audit?${params}`, { credentials: "include" }); if (!r.ok) throw new Error("Unable to load intake audit"); return r.json(); }, enabled: allowed });
+  const totalPages = Math.max(1, Math.ceil((data?.total || 0) / (data?.limit || 20)));
+  return <div className="min-h-screen bg-gray-50 flex flex-col"><Navigation /><main className="mx-auto w-full max-w-6xl flex-1 px-4 py-7 sm:px-6">
+    {!allowed ? <Card className="max-w-md mx-auto"><CardContent className="p-6 text-center"><AlertCircle className="mx-auto mb-3 text-red-500" /><h1 className="font-semibold">Access denied</h1><p className="mt-1 text-sm text-muted-foreground">Intake Audit is available to platform administrators only.</p></CardContent></Card> : <>
+      <div className="mb-6"><h1 className="text-2xl font-bold text-catalyst-navy">Intake Audit</h1><p className="mt-1 text-sm text-muted-foreground">Review email sourcing, extraction, and final deal values. Results are newest first.</p></div>
+      <div className="mb-5 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+        <p className="font-semibold">Central DealLinq deal intake</p>
+        <p className="mt-1">Approving an email creates a deal in DealLinq’s central deal inventory. Email intake does not assign deals to a specific Investment Company account.</p>
+      </div>
+      <EmailAutomationToggle />
+      <Card className="mb-5"><CardContent className="p-4"><form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" onSubmit={e => { e.preventDefault(); setPage(1); setAppliedSearch(search); }}><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search sender, subject, deal" /><select className="h-10 rounded-md border bg-background px-3 text-sm" value={status} onChange={e => { setStatus(e.target.value); setPage(1); }}><option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><Input type="date" value={fromDate} onChange={e => { setFromDate(e.target.value); setPage(1); }} aria-label="From date" /><Input type="date" value={toDate} onChange={e => { setToDate(e.target.value); setPage(1); }} aria-label="To date" /><Button type="submit"><Search className="mr-2 h-4 w-4" />Search</Button></form></CardContent></Card>
+      <p className="mb-3 text-sm text-muted-foreground">{data?.total ?? 0} audit record{data?.total === 1 ? "" : "s"}</p>
+      {isLoading ? <p className="py-12 text-center text-sm text-muted-foreground">Loading audit records…</p> : isError ? <p className="py-12 text-center text-sm text-red-600">Unable to load intake audit records.</p> : !data?.items.length ? <p className="py-12 text-center text-sm text-muted-foreground">No intake records match these filters.</p> : <div className="space-y-3">{data.items.map((item, index) => <AuditItem key={item.id || item.dealId || index} item={item} />)}</div>}
+      <div className="mt-5 flex items-center justify-between"><Button variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button><span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span><Button variant="outline" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Next</Button></div>
+    </>}</main><Footer /></div>;
+}

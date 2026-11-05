@@ -1,0 +1,1507 @@
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Loader2,
+  Mail,
+  Pencil,
+  Plus,
+  Save,
+  Settings2,
+  Trash2,
+  Users,
+} from "lucide-react";
+import DeveloperNavigation from "@/components/developer-navigation";
+import { CountyMarketEditor, StateMultiSelect } from "@/components/target-market-editors";
+import Footer from "@/components/footer";
+import YocAssumptionsPanel, {
+  getNationalYocDefaults,
+  YOC_ASSUMPTION_KEYS,
+  type YocAssumptionsValue,
+} from "@/components/yoc-assumptions-panel";
+import { useToast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import IndustrialCriteriaFields from "@/components/industrial-criteria-fields";
+import StateCriteriaOverrides, { type CriteriaOverrideValue } from "@/components/state-criteria-overrides";
+import ProductTypeNameField from "@/components/product-type-name-field";
+import SharedContactAccessEditor, {
+  type ContactCountyOption,
+  type ContactFilterOption,
+} from "@/components/shared-contact-access-editor";
+import {
+  DEFAULT_INDUSTRIAL_CRITERIA,
+  type DeveloperAssetClass,
+  type IndustrialCriteria,
+} from "@shared/industrial-criteria";
+import { DEFAULT_RURAL_LAND_CRITERIA, type RuralLandCriteria } from "@shared/rural-land-criteria";
+import { parseCountyTarget } from "@shared/county-targets";
+import { normalizeUsStateCode } from "@shared/us-states";
+import { DEFAULT_PURCHASE_CRITERIA, normalizePurchaseCriteria, type PurchaseCriteria } from "@shared/purchase-criteria";
+
+type Profile = {
+  companyName: string;
+  profileType: "real_estate" | "general_sales";
+  assetClass: DeveloperAssetClass;
+  industrialCriteria: IndustrialCriteria;
+  ruralLandCriteria: RuralLandCriteria;
+  purchaseCriteria: PurchaseCriteria;
+  primaryColor: string | null;
+  secondaryColor: string | null;
+  outreachTestModeEnabled: boolean;
+  emailUnsubscribeEnabled: boolean;
+  targetStates: string[];
+  targetCounties: string[];
+  rentMetric: "psf" | "per_unit";
+  compSearchRadiusMiles: string;
+  compMinVintageYear: string;
+  compMinUnits: string;
+  productTypes: ProductType[];
+  countyMarketLabels: Record<string, string>;
+  qctOverridesRentMinimum: boolean;
+  ddaOverridesRentMinimum: boolean;
+  ozOverridesRentMinimum: boolean;
+  crmContactSectors: string[];
+  crmContactStates: string[];
+  crmContactCounties: string[];
+  crmContactProductTypes: string[];
+  crmContactSourceTags: string[];
+  crmSharedContactsEnabled: boolean;
+};
+
+type ProfileUpdate = Omit<Partial<Profile>, "compMinVintageYear" | "compMinUnits"> & {
+  compMinVintageYear?: string | null;
+  compMinUnits?: string | null;
+};
+
+type ContactFilterOptions = {
+  sourceTags: string[];
+  states: ContactFilterOption[];
+  counties: ContactCountyOption[];
+  sectors: ContactFilterOption[];
+};
+
+type ProductType = {
+  id?: string;
+  name: string;
+  minAcres: string;
+  maxAcres: string | null;
+  minRentPsf: string | null;
+  minRentPerUnit: string | null;
+  stateOverrides: CriteriaOverrideValue;
+  dua: string | null;
+  hardCostPu: string | null;
+  assumedLandCostPu: string | null;
+  assumedLandCostPuCoastal: string | null;
+  softCostPct: string | null;
+  otherIncomePum: string | null;
+  fixedOpExPu: string | null;
+  insurancePuNc: string | null;
+  insurancePuCoastal: string | null;
+  vacancyPct: string | null;
+  ltlPct: string | null;
+  concessionPct: string | null;
+  badDebtPct: string | null;
+  mgmtFeePct: string | null;
+  rentGrowthPct: string | null;
+  otherIncomeGrowthPct: string | null;
+  expenseGrowthPct: string | null;
+  holdPeriodYears: string | null;
+  exitCapRatePct: string | null;
+  unitMix: Array<{ pct: number; avgSF: number; monthlyRent: number }> | null;
+  isActive: boolean;
+};
+
+type TeamMember = {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  createdAt: string | null;
+};
+
+type NotificationSender = {
+  id: string;
+  name: string;
+  email: string;
+  outlookConnected: boolean;
+  connectionStatus: "connected" | "not_connected" | "needs_verification";
+  hasMicrosoftToken?: boolean;
+  isNotificationSender?: boolean;
+  isActive?: boolean;
+};
+
+type EffectiveSender = {
+  name: string;
+  email: string;
+  source: "company_outlook" | "platform_fallback";
+};
+
+type DeveloperQuickLink = {
+  id: string;
+  label: string;
+  url: string;
+  sortOrder: number;
+  isActive: boolean;
+};
+
+async function jsonRequest(url: string, options?: RequestInit) {
+  const response = await fetch(url, { credentials: "include", ...options });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || data.message || "Request failed");
+  return data;
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required,
+  step = 0.01,
+  min = 0,
+  max,
+  helperText,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+  step?: number;
+  min?: number;
+  max?: number;
+  helperText?: string;
+}) {
+  return (
+    <div>
+      <Label>{label} {required && <span className="text-red-500">*</span>}</Label>
+      <Input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="mt-2 bg-white"
+      />
+      {helperText && <p className="mt-1 text-xs text-slate-500">{helperText}</p>}
+    </div>
+  );
+}
+
+export default function DeveloperCriteriaSettings({ criteriaOnly = false }: { criteriaOnly?: boolean }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState<Profile | null>(null);
+  const [testRecipientEmail, setTestRecipientEmail] = useState("");
+  const [overridesOpen, setOverridesOpen] = useState(true);
+  const [teamOpen, setTeamOpen] = useState(true);
+  const [quickLinkLabel, setQuickLinkLabel] = useState("");
+  const [quickLinkUrl, setQuickLinkUrl] = useState("");
+  const [editingQuickLinkId, setEditingQuickLinkId] = useState<string | null>(null);
+  const [quickLinksOpen, setQuickLinksOpen] = useState(false);
+  const [assumptionsOpenIndex, setAssumptionsOpenIndex] = useState<number | null>(null);
+
+  const profileQuery = useQuery<{ profile: Profile }>({
+    queryKey: ["/api/developer-profile/me"],
+    queryFn: () => jsonRequest("/api/developer-profile/me"),
+  });
+  const sourceTagsQuery = useQuery<ContactFilterOptions>({
+    queryKey: ["/api/crm/source-tags"],
+    queryFn: () => jsonRequest("/api/crm/source-tags"),
+    enabled: !criteriaOnly,
+  });
+  const teamQuery = useQuery<{ team: TeamMember[] }>({
+    queryKey: ["/api/developer-profile/me/team"],
+    queryFn: () => jsonRequest("/api/developer-profile/me/team"),
+    enabled: !criteriaOnly,
+  });
+  const senderQuery = useQuery<{
+    sender: NotificationSender | null;
+    effectiveSender: EffectiveSender;
+  }>({
+    queryKey: ["/api/developer-profile/me/outreach/sender"],
+    queryFn: () => jsonRequest("/api/developer-profile/me/outreach/sender"),
+    enabled: !criteriaOnly,
+  });
+  const senderListQuery = useQuery<{ senders: NotificationSender[] }>({
+    queryKey: ["/api/developer-profile/me/outreach/senders"],
+    queryFn: () => jsonRequest("/api/developer-profile/me/outreach/senders"),
+    enabled: !criteriaOnly,
+  });
+  const quickLinksQuery = useQuery<{ links: DeveloperQuickLink[] }>({
+    queryKey: ["/api/developer/quick-links"],
+    queryFn: () => jsonRequest("/api/developer/quick-links"),
+    enabled: !criteriaOnly,
+  });
+  const notificationSenderMutation = useMutation({
+    mutationFn: (senderId: string) =>
+      jsonRequest("/api/developer-profile/me/outreach/notification-sender", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ senderId }),
+      }),
+    onSuccess: () => {
+      toast({ title: "Notification sender updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/developer-profile/me/outreach/sender"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/developer-profile/me/outreach/senders"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Unable to update notification sender", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const connectedNotificationSenders = (senderListQuery.data?.senders || []).filter(
+    (sender) => sender.connectionStatus === "connected" && sender.isActive !== false,
+  );
+  const selectedNotificationSender =
+    connectedNotificationSenders.find((sender) => sender.isNotificationSender) ||
+    connectedNotificationSenders.find((sender) => sender.email === senderQuery.data?.effectiveSender?.email) ||
+    connectedNotificationSenders[0];
+
+  useEffect(() => {
+    if (profileQuery.data?.profile) {
+      const profile = profileQuery.data.profile;
+      setForm({
+        ...profile,
+        assetClass: profile.assetClass || "multifamily",
+        industrialCriteria: profile.industrialCriteria || DEFAULT_INDUSTRIAL_CRITERIA,
+        ruralLandCriteria: profile.ruralLandCriteria || DEFAULT_RURAL_LAND_CRITERIA,
+        purchaseCriteria: normalizePurchaseCriteria(profile.purchaseCriteria || DEFAULT_PURCHASE_CRITERIA),
+        targetStates: Array.from(new Set((profile.targetStates || []).map(normalizeUsStateCode).filter(Boolean))),
+        targetCounties: profile.targetCounties || [],
+        productTypes: (profile.productTypes || []).map((productType) => ({
+          ...productType,
+          minAcres: productType.minAcres || "",
+          maxAcres: productType.maxAcres || "",
+          minRentPsf: productType.minRentPsf || "",
+          minRentPerUnit: productType.minRentPerUnit || "",
+          stateOverrides: productType.stateOverrides || {},
+          dua: productType.dua || "",
+          hardCostPu: productType.hardCostPu || "",
+          assumedLandCostPu: productType.assumedLandCostPu || "",
+          assumedLandCostPuCoastal: productType.assumedLandCostPuCoastal || "",
+          softCostPct: productType.softCostPct || "",
+          otherIncomePum: productType.otherIncomePum || "",
+          fixedOpExPu: productType.fixedOpExPu || "",
+          insurancePuNc: productType.insurancePuNc || "",
+          insurancePuCoastal: productType.insurancePuCoastal || "",
+          vacancyPct: productType.vacancyPct || "",
+          ltlPct: productType.ltlPct || "",
+          concessionPct: productType.concessionPct || "",
+          badDebtPct: productType.badDebtPct || "",
+          mgmtFeePct: productType.mgmtFeePct || "",
+          rentGrowthPct: productType.rentGrowthPct || "",
+          otherIncomeGrowthPct: productType.otherIncomeGrowthPct || "",
+          expenseGrowthPct: productType.expenseGrowthPct || "",
+          holdPeriodYears: productType.holdPeriodYears?.toString() || "",
+          exitCapRatePct: productType.exitCapRatePct || "",
+          unitMix: productType.unitMix || null,
+          isActive: productType.isActive !== false,
+        })),
+        countyMarketLabels: profile.countyMarketLabels || {},
+        crmContactSectors: profile.crmContactSectors || [],
+        crmContactStates: profile.crmContactStates || [],
+        crmContactCounties: profile.crmContactCounties || [],
+        crmContactProductTypes: profile.crmContactProductTypes || [],
+        crmContactSourceTags: profile.crmContactSourceTags || [],
+        crmSharedContactsEnabled: profile.profileType === "real_estate" && profile.crmSharedContactsEnabled === true,
+        compSearchRadiusMiles: profile.compSearchRadiusMiles || "3",
+        compMinVintageYear: profile.compMinVintageYear == null ? "" : String(profile.compMinVintageYear),
+        compMinUnits: profile.compMinUnits == null ? "" : String(profile.compMinUnits),
+         emailUnsubscribeEnabled: Boolean(profile.emailUnsubscribeEnabled),
+      });
+      setAssumptionsOpenIndex(null);
+    }
+  }, [profileQuery.data]);
+
+  const saveMutation = useMutation({
+    mutationFn: (payload: ProfileUpdate) =>
+      jsonRequest("/api/developer-profile/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["/api/developer-profile/me"], data);
+      setForm({
+        ...data.profile,
+        compMinVintageYear: data.profile.compMinVintageYear == null ? "" : String(data.profile.compMinVintageYear),
+        compMinUnits: data.profile.compMinUnits == null ? "" : String(data.profile.compMinUnits),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/user"] });
+      toast({ title: "Settings saved", description: "Your company criteria are up to date." });
+    },
+    onError: (error: Error) => toast({ title: "Could not save settings", description: error.message, variant: "destructive" }),
+  });
+
+  const outreachTestModeMutation = useMutation({
+    mutationFn: (enabled: boolean) => jsonRequest("/api/developer-profile/me/outreach/test-mode", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
+    onSuccess: (data: { outreachTestModeEnabled: boolean }) => {
+      queryClient.setQueryData(["/api/developer-profile/me"], (current: any) => current
+        ? { ...current, profile: { ...current.profile, outreachTestModeEnabled: data.outreachTestModeEnabled } }
+        : current);
+      setForm((current) => current
+        ? { ...current, outreachTestModeEnabled: data.outreachTestModeEnabled }
+        : current);
+      toast({
+        title: data.outreachTestModeEnabled ? "Outreach Test mode enabled" : "Outreach Live mode enabled",
+        description: data.outreachTestModeEnabled
+          ? "Recurring outreach will be recorded without delivering messages."
+          : "Recurring outreach can deliver messages normally.",
+      });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not update outreach mode",
+      description: error.message,
+      variant: "destructive",
+    }),
+  });
+
+  const emailUnsubscribeMutation = useMutation({
+    mutationFn: (enabled: boolean) => jsonRequest("/api/developer-profile/me/outreach/unsubscribe", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
+    onSuccess: (data: { emailUnsubscribeEnabled: boolean }) => {
+      queryClient.setQueryData(["/api/developer-profile/me"], (current: any) => current
+        ? { ...current, profile: { ...current.profile, emailUnsubscribeEnabled: data.emailUnsubscribeEnabled } }
+        : current);
+      setForm((current) => current
+        ? { ...current, emailUnsubscribeEnabled: data.emailUnsubscribeEnabled }
+        : current);
+      toast({
+        title: data.emailUnsubscribeEnabled ? "Unsubscribe links enabled" : "Unsubscribe links disabled",
+        description: data.emailUnsubscribeEnabled
+          ? "Organization emails will include a one-click unsubscribe link."
+          : "Organization emails will no longer include the automatic unsubscribe link.",
+      });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not update unsubscribe setting",
+      description: error.message,
+      variant: "destructive",
+    }),
+  });
+
+  const testEmailMutation = useMutation({
+    mutationFn: (testEmail: string) => jsonRequest("/api/send-test-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ testEmail }),
+    }),
+    onSuccess: () => {
+      toast({
+        title: "Test email sent",
+        description: `Check ${testRecipientEmail.trim()} for the current outreach email.`,
+      });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not send test email",
+      description: error.message,
+      variant: "destructive",
+    }),
+  });
+
+  const quickLinkMutation = useMutation({
+    mutationFn: (payload: { id?: string; label: string; url: string }) =>
+      jsonRequest(payload.id ? `/api/developer/quick-links/${payload.id}` : "/api/developer/quick-links", {
+        method: payload.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: payload.label, url: payload.url }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/developer/quick-links"] });
+      setQuickLinkLabel("");
+      setQuickLinkUrl("");
+      setEditingQuickLinkId(null);
+      setQuickLinksOpen(false);
+      toast({ title: "Quick link saved" });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not save quick link",
+      description: error.message,
+      variant: "destructive",
+    }),
+  });
+
+  const deleteQuickLinkMutation = useMutation({
+    mutationFn: (id: string) => jsonRequest(`/api/developer/quick-links/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/developer/quick-links"] });
+      if (editingQuickLinkId) {
+        setQuickLinkLabel("");
+        setQuickLinkUrl("");
+        setEditingQuickLinkId(null);
+        setQuickLinksOpen(false);
+      }
+      toast({ title: "Quick link deleted" });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not delete quick link",
+      description: error.message,
+      variant: "destructive",
+    }),
+  });
+
+  const update = <K extends keyof Profile>(key: K, value: Profile[K]) =>
+    setForm((current) => current ? { ...current, [key]: value } : current);
+
+  const updatePurchaseCriteria = (
+    section: keyof PurchaseCriteria,
+    field: string,
+    rawValue: string,
+  ) => {
+    const value = rawValue === "" ? null : Number(rawValue);
+    setForm((current) => current ? {
+      ...current,
+      purchaseCriteria: {
+        ...current.purchaseCriteria,
+        [section]: {
+          ...current.purchaseCriteria[section],
+          [field]: value,
+        },
+      } as PurchaseCriteria,
+    } : current);
+  };
+
+  const updateTargetStates = (nextStates: string[]) => {
+    if (!form) return;
+    const normalizedNextStates = Array.from(new Set(nextStates.map(normalizeUsStateCode).filter(Boolean)));
+    const previousStates = new Set(form.targetStates.map(normalizeUsStateCode));
+    const removedStates = new Set(Array.from(previousStates).filter((state) => !normalizedNextStates.includes(state)));
+    const nextCounties = form.targetCounties.filter((target) => {
+      const state = parseCountyTarget(target).state;
+      return !state || !removedStates.has(normalizeUsStateCode(state));
+    });
+    const matchingLabelKeys = new Set<string>();
+    nextCounties.forEach((target) => {
+      const parsed = parseCountyTarget(target);
+      matchingLabelKeys.add(target);
+      matchingLabelKeys.add(parsed.county);
+    });
+    const nextLabels = Object.fromEntries(
+      Object.entries(form.countyMarketLabels).filter(([key]) => matchingLabelKeys.has(key)),
+    );
+    const removeStateOverrides = (overrides: CriteriaOverrideValue) => Object.fromEntries(
+      Object.entries(overrides || {}).filter(([state]) => !removedStates.has(normalizeUsStateCode(state))),
+    );
+    setForm({
+      ...form,
+      targetStates: normalizedNextStates,
+      targetCounties: nextCounties,
+      countyMarketLabels: nextLabels,
+      productTypes: form.productTypes.map((productType) => ({
+        ...productType,
+        stateOverrides: removeStateOverrides(productType.stateOverrides),
+      })),
+      industrialCriteria: {
+        ...form.industrialCriteria,
+        stateOverrides: removeStateOverrides(form.industrialCriteria.stateOverrides),
+        productTypes: form.industrialCriteria.productTypes.map((productType) => ({
+          ...productType,
+          stateOverrides: removeStateOverrides(productType.stateOverrides as CriteriaOverrideValue),
+        })),
+      },
+    });
+  };
+
+  const save = () => {
+    if (!form) return;
+    if (form.profileType === "general_sales") {
+      saveMutation.mutate({
+        profileType: "general_sales",
+        crmContactSectors: form.crmContactSectors,
+        crmContactStates: form.crmContactStates,
+        crmContactCounties: form.crmContactCounties,
+        crmContactProductTypes: form.crmContactProductTypes,
+        crmContactSourceTags: form.crmContactSourceTags,
+        crmSharedContactsEnabled: false,
+      });
+      return;
+    }
+    if (form.assetClass === "industrial") {
+      saveMutation.mutate({
+        assetClass: "industrial",
+        industrialCriteria: form.industrialCriteria,
+        purchaseCriteria: form.purchaseCriteria,
+        targetStates: form.targetStates,
+        targetCounties: form.targetCounties,
+        countyMarketLabels: form.countyMarketLabels,
+        productTypes: [],
+        crmContactSectors: form.crmContactSectors,
+        crmContactStates: form.crmContactStates,
+        crmContactCounties: form.crmContactCounties,
+        crmContactProductTypes: form.crmContactProductTypes,
+        crmContactSourceTags: form.crmContactSourceTags,
+        crmSharedContactsEnabled: form.crmSharedContactsEnabled,
+      });
+      return;
+    }
+    if (form.assetClass === "rural_land") {
+      saveMutation.mutate({
+        assetClass: "rural_land",
+        ruralLandCriteria: form.ruralLandCriteria,
+        purchaseCriteria: form.purchaseCriteria,
+        targetStates: form.targetStates,
+        targetCounties: form.targetCounties,
+        countyMarketLabels: form.countyMarketLabels,
+        productTypes: [],
+        crmContactSectors: form.crmContactSectors,
+        crmContactStates: form.crmContactStates,
+        crmContactCounties: form.crmContactCounties,
+        crmContactProductTypes: form.crmContactProductTypes,
+        crmContactSourceTags: form.crmContactSourceTags,
+        crmSharedContactsEnabled: form.crmSharedContactsEnabled,
+      });
+      return;
+    }
+    if (form.assetClass === "multifamily_acquisition") {
+      const existing = form.purchaseCriteria.existing;
+      if (!existing.minUnits || existing.minUnits < 1 || !existing.minVintageYear || !form.targetStates.length) {
+        toast({ title: "Minimum units, minimum vintage year, and target states are required", variant: "destructive" });
+        return;
+      }
+      saveMutation.mutate({
+        assetClass: "multifamily_acquisition",
+        purchaseCriteria: {
+          ...form.purchaseCriteria,
+          existing: { ...existing, targetStates: form.targetStates },
+        },
+        targetStates: form.targetStates,
+        targetCounties: form.targetCounties,
+        countyMarketLabels: form.countyMarketLabels,
+        productTypes: [],
+        crmContactSectors: form.crmContactSectors,
+        crmContactStates: form.crmContactStates,
+        crmContactCounties: form.crmContactCounties,
+        crmContactProductTypes: form.crmContactProductTypes,
+        crmContactSourceTags: form.crmContactSourceTags,
+        crmSharedContactsEnabled: form.crmSharedContactsEnabled,
+      });
+      return;
+    }
+    if (!form.productTypes.length || !form.productTypes.some((productType) => productType.isActive)) {
+      toast({ title: "Add at least one active product type before saving", variant: "destructive" });
+      return;
+    }
+    if (!form.compSearchRadiusMiles || Number(form.compSearchRadiusMiles) <= 0) {
+      toast({ title: "Comparable search radius must be greater than zero", variant: "destructive" });
+      return;
+    }
+    if (form.compMinVintageYear === "") {
+      toast({ title: "Minimum comp vintage year is required", variant: "destructive" });
+      return;
+    }
+    if (form.compMinVintageYear !== "") {
+      const year = Number(form.compMinVintageYear);
+      if (!Number.isInteger(year) || year < 1900 || year > 2100) {
+        toast({ title: "Minimum comp vintage year must be a year between 1900 and 2100", variant: "destructive" });
+        return;
+      }
+    }
+    if (form.compMinUnits === "") {
+      toast({ title: "Minimum comp units are required", variant: "destructive" });
+      return;
+    }
+    if (form.compMinUnits !== "" && (!Number.isInteger(Number(form.compMinUnits)) || Number(form.compMinUnits) < 0)) {
+      toast({ title: "Minimum comp units must be a non-negative whole number", variant: "destructive" });
+      return;
+    }
+    for (let index = 0; index < form.productTypes.length; index++) {
+      const productType = form.productTypes[index];
+      if (!productType.name.trim()) {
+        toast({ title: `Product type ${index + 1} needs a name`, variant: "destructive" });
+        return;
+      }
+      if (productType.minAcres === "" || Number(productType.minAcres) < 0) {
+        toast({ title: `${productType.name}: minimum acreage is required`, variant: "destructive" });
+        return;
+      }
+      if (productType.maxAcres && Number(productType.maxAcres) < Number(productType.minAcres)) {
+        toast({ title: `${productType.name}: maximum acreage must be at least the minimum`, variant: "destructive" });
+        return;
+      }
+      const rent = form.rentMetric === "psf" ? productType.minRentPsf : productType.minRentPerUnit;
+      if (productType.isActive && (!rent || Number(rent) <= 0)) {
+        toast({ title: `${productType.name}: minimum ${form.rentMetric === "psf" ? "$/SF" : "$/Unit"} is required`, variant: "destructive" });
+        return;
+      }
+    }
+    saveMutation.mutate({
+      purchaseCriteria: form.purchaseCriteria,
+      targetStates: form.targetStates,
+      targetCounties: form.targetCounties,
+      rentMetric: form.rentMetric,
+      compSearchRadiusMiles: form.compSearchRadiusMiles,
+      compMinVintageYear: form.compMinVintageYear === "" ? null : form.compMinVintageYear,
+      compMinUnits: form.compMinUnits === "" ? null : form.compMinUnits,
+      productTypes: form.productTypes.map(({ id: _id, ...productType }) => ({
+        ...productType,
+        name: productType.name.trim(),
+        maxAcres: productType.maxAcres || null,
+        minRentPsf: productType.minRentPsf || null,
+        minRentPerUnit: productType.minRentPerUnit || null,
+        stateOverrides: productType.stateOverrides || {},
+        ...Object.fromEntries(YOC_ASSUMPTION_KEYS.map((key) => [
+          key,
+          productType[key] === "" || productType[key] === undefined ? null : productType[key],
+        ])),
+        unitMix: productType.unitMix || null,
+      })),
+      crmContactSectors: form.crmContactSectors,
+      crmContactStates: form.crmContactStates,
+      crmContactCounties: form.crmContactCounties,
+      crmContactProductTypes: form.crmContactProductTypes,
+      crmContactSourceTags: form.crmContactSourceTags,
+      crmSharedContactsEnabled: form.crmSharedContactsEnabled,
+      countyMarketLabels: form.countyMarketLabels,
+      qctOverridesRentMinimum: form.qctOverridesRentMinimum,
+      ddaOverridesRentMinimum: form.ddaOverridesRentMinimum,
+      ozOverridesRentMinimum: form.ozOverridesRentMinimum,
+    });
+  };
+
+  const addProductType = () => {
+    if (!form) return;
+    update("productTypes", [
+      ...form.productTypes,
+      {
+        name: "",
+        minAcres: "",
+        maxAcres: "",
+        minRentPsf: "",
+        minRentPerUnit: "",
+        stateOverrides: {},
+        dua: "",
+        hardCostPu: "",
+        assumedLandCostPu: "",
+        assumedLandCostPuCoastal: "",
+        softCostPct: "",
+        otherIncomePum: "",
+        fixedOpExPu: "",
+        insurancePuNc: "",
+        insurancePuCoastal: "",
+        vacancyPct: "",
+        ltlPct: "",
+        concessionPct: "",
+        badDebtPct: "",
+        mgmtFeePct: "",
+        rentGrowthPct: "",
+        otherIncomeGrowthPct: "",
+        expenseGrowthPct: "",
+        holdPeriodYears: "",
+        exitCapRatePct: "",
+        unitMix: null,
+        isActive: true,
+      },
+    ]);
+  };
+  const updateProductType = (index: number, patch: Partial<ProductType>) => {
+    if (!form) return;
+    update("productTypes", form.productTypes.map((productType, productIndex) =>
+      productIndex === index ? { ...productType, ...patch } : productType,
+    ));
+  };
+
+  if (profileQuery.isLoading || !form) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <DeveloperNavigation />
+        <div className="flex min-h-96 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-slate-500" /></div>
+        <Footer />
+      </div>
+    );
+  }
+  if (profileQuery.isError) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <DeveloperNavigation />
+        <div className="mx-auto max-w-3xl px-6 py-16 text-center text-red-600">{(profileQuery.error as Error).message}</div>
+        <Footer />
+      </div>
+    );
+  }
+
+  const primaryColor = form.primaryColor || "#0A2B4A";
+  const secondaryColor = form.secondaryColor || "#4A90E2";
+  const isPsf = form.rentMetric === "psf";
+  const supportsCriteria = form.profileType === "real_estate" &&
+    (form.assetClass === "multifamily" || form.assetClass === "multifamily_acquisition" || form.assetClass === "industrial" || form.assetClass === "rural_land");
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <DeveloperNavigation />
+      <main className="mx-auto max-w-[1680px] px-4 py-8 sm:px-6 lg:px-8">
+        <PageHeader
+          title={criteriaOnly ? "Criteria" : form.profileType === "general_sales" ? "Company settings" : "Settings"}
+          actions={!criteriaOnly || supportsCriteria ? (
+            <Button onClick={save} disabled={saveMutation.isPending} style={{ backgroundColor: primaryColor }} className="text-white">
+              {saveMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+              {criteriaOnly ? "Save criteria" : "Save settings"}
+            </Button>
+          ) : undefined}
+        />
+
+        <div className="space-y-6">
+          {criteriaOnly && <p className="text-sm text-slate-600">Manage the criteria used for this company’s opportunities. These settings are scoped to the signed-in developer profile.</p>}
+          <div className={criteriaOnly ? "hidden" : "space-y-6"}>
+          {form.profileType === "real_estate" ? (
+            <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+              <CardHeader>
+                <CardTitle>Shared broker contacts</CardTitle>
+                <CardDescription>
+                  New groups start opted out. A group must enable the shared directory before those broker contacts appear in its CRM.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5 border-t border-slate-100 pt-5">
+                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <Checkbox
+                    checked={form.crmSharedContactsEnabled}
+                    onCheckedChange={(checked) => update("crmSharedContactsEnabled", checked === true)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-800">Opt in to shared broker contacts</span>
+                    <span className="mt-1 block text-xs leading-5 text-slate-500">When enabled, members can browse matching shared contacts. Company-owned contacts, CRM tags, notes, assignments, and outreach history remain private.</span>
+                  </span>
+                </label>
+                {form.crmSharedContactsEnabled ? (
+                  <SharedContactAccessEditor
+                    sectors={form.crmContactSectors}
+                    states={form.crmContactStates}
+                    counties={form.crmContactCounties}
+                    sourceTags={form.crmContactSourceTags}
+                    sectorOptions={sourceTagsQuery.data?.sectors || []}
+                    stateOptions={sourceTagsQuery.data?.states || []}
+                    countyOptions={sourceTagsQuery.data?.counties || []}
+                    sourceTagOptions={sourceTagsQuery.data?.sourceTags || []}
+                    optionsLoading={sourceTagsQuery.isLoading}
+                    optionsError={sourceTagsQuery.isError}
+                    onSectorsChange={(values) => update("crmContactSectors", values)}
+                    onStatesChange={(values) => update("crmContactStates", values)}
+                    onCountiesChange={(values) => update("crmContactCounties", values)}
+                    onSourceTagsChange={(values) => update("crmContactSourceTags", values)}
+                  />
+                ) : (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-4 py-3 text-sm text-slate-500">
+                    Shared broker contacts are hidden. Your company-owned contacts remain available in the CRM.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          ) : form.profileType === "general_sales" ? (
+            <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+              <CardHeader>
+                <CardTitle>Company-owned contacts</CardTitle>
+                <CardDescription>
+                  Add your company’s brokers, attorneys, contractors, and other contacts from the CRM. This profile does not browse the shared broker directory.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          ) : null}
+          <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader>
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl p-2" style={{ backgroundColor: `${secondaryColor}18`, color: primaryColor }}>
+                  <Mail className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle>Outreach notifications</CardTitle>
+                  <CardDescription>
+                    Verified company Outlook sends these messages when available; otherwise they use the platform sender.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="border-t border-slate-100 pt-5">
+              {senderQuery.isLoading ? (
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading sender…
+                </div>
+              ) : senderQuery.isError ? (
+                <p className="text-sm text-red-600">Unable to load the broker notification sender.</p>
+              ) : senderQuery.data?.effectiveSender?.email ? (
+                connectedNotificationSenders.length >= 2 ? (
+                  <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <Label htmlFor="notification-sender-select" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Sender address
+                      </Label>
+                      <Select
+                        value={selectedNotificationSender?.id || ""}
+                        onValueChange={(senderId) => notificationSenderMutation.mutate(senderId)}
+                        disabled={notificationSenderMutation.isPending || !selectedNotificationSender}
+                      >
+                        <SelectTrigger id="notification-sender-select" className="mt-1 bg-white">
+                          <SelectValue placeholder="Select a connected sender" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {connectedNotificationSenders.map((sender) => (
+                            <SelectItem key={sender.id} value={sender.id}>
+                              {sender.name} — {sender.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Badge variant="secondary" className="w-fit bg-emerald-50 text-emerald-700">
+                      Outlook connected
+                    </Badge>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sender address</p>
+                      <p className="mt-1 font-semibold text-slate-900">{senderQuery.data.effectiveSender.email}</p>
+                      <p className="mt-1 text-xs text-slate-500">{senderQuery.data.effectiveSender.name}</p>
+                    </div>
+                    <div className="flex w-fit flex-wrap items-center gap-2">
+                      {senderQuery.data.effectiveSender.source === "platform_fallback" &&
+                        senderQuery.data.sender?.connectionStatus === "needs_verification" && (
+                          <Badge variant="secondary" className="bg-amber-100 text-amber-800">
+                            Outlook needs verification
+                          </Badge>
+                        )}
+                      <Badge
+                        variant="secondary"
+                        className={senderQuery.data.effectiveSender.source === "company_outlook"
+                          ? "w-fit bg-emerald-50 text-emerald-700"
+                          : "w-fit bg-amber-50 text-amber-700"}
+                      >
+                        {senderQuery.data.effectiveSender.source === "company_outlook" ? "Outlook connected" : "Platform fallback"}
+                      </Badge>
+                    </div>
+                  </div>
+                )
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  No connected Outlook sender is configured. Connect Outlook in Outreach to enable broker notification delivery from your company mailbox.
+                </div>
+              )}
+              {senderQuery.data?.effectiveSender?.source === "platform_fallback" && (
+                <p className="mt-3 text-xs text-amber-700">
+                  {senderQuery.data.sender?.connectionStatus === "needs_verification"
+                    ? `Outlook for ${senderQuery.data.sender.email} needs verification. Reconnect it in Outreach. Until then, broker notifications use the platform address above.`
+                    : senderQuery.data.sender
+                      ? "No verified company Outlook sender is available, so broker notifications currently come from the platform address above."
+                      : "No company Outlook sender is configured, so broker notifications currently come from the platform address above."}
+                </p>
+              )}
+              {connectedNotificationSenders.length <= 1 ? (
+                <p className="mt-3 text-xs text-slate-500">
+                  This is display-only. Manage the connected account from Outreach.
+                </p>
+              ) : (
+                <p className="mt-3 text-xs text-slate-500">
+                  Choose which connected mailbox sends broker notifications.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader>
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl p-2" style={{ backgroundColor: `${secondaryColor}18`, color: primaryColor }}>
+                  <Mail className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle>Outreach sending mode</CardTitle>
+                  <CardDescription>
+                    Test mode runs this company’s recurring outreach without delivering messages. Live mode sends to eligible brokers.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5 border-t border-slate-100 pt-5">
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 p-4">
+                <div>
+                  <p className="font-medium text-slate-900">
+                    {form.outreachTestModeEnabled ? "Test mode" : "Live mode"}
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    {form.outreachTestModeEnabled
+                      ? "Messages are recorded as dry runs and are not delivered."
+                      : "Messages may be delivered according to the outreach schedule."}
+                  </p>
+                </div>
+                <Switch
+                  checked={Boolean(form.outreachTestModeEnabled)}
+                  onCheckedChange={(checked) => outreachTestModeMutation.mutate(checked)}
+                  disabled={outreachTestModeMutation.isPending}
+                  aria-label="Toggle outreach Test mode"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 p-4">
+                <div>
+                  <p className="font-medium text-slate-900">One-click unsubscribe link</p>
+                  <p className="max-w-2xl text-sm text-slate-500">
+                    Add an unsubscribe link to every email sent from this company’s connected Outlook senders.
+                    Clicking it immediately marks the contact inactive and stops future outreach.
+                  </p>
+                </div>
+                <Switch
+                  checked={Boolean(form.emailUnsubscribeEnabled)}
+                  onCheckedChange={(checked) => emailUnsubscribeMutation.mutate(checked)}
+                  disabled={emailUnsubscribeMutation.isPending}
+                  aria-label="Toggle one-click unsubscribe links"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="outreach-test-recipient">Send a live test email</Label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    id="outreach-test-recipient"
+                    type="email"
+                    value={testRecipientEmail}
+                    onChange={(event) => setTestRecipientEmail(event.target.value)}
+                    placeholder="you@example.com"
+                    className="sm:flex-1"
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      const recipient = testRecipientEmail.trim();
+                      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+                        toast({ title: "Enter a valid recipient email", variant: "destructive" });
+                        return;
+                      }
+                      testEmailMutation.mutate(recipient);
+                    }}
+                    disabled={!testRecipientEmail.trim() || testEmailMutation.isPending}
+                  >
+                    {testEmailMutation.isPending ? "Sending…" : "Send live test email"}
+                  </Button>
+                </div>
+                <p className="text-sm text-slate-500">
+                  Sends the company’s current outreach template from its configured outreach sender to this address.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          </div>
+          </div>
+
+          {criteriaOnly && form.profileType === "general_sales" && <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader>
+              <CardTitle>Deal criteria do not apply to this profile</CardTitle>
+              <CardDescription>General Sales profiles use the separate opportunity pipeline and do not use real-estate deal-screening criteria.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="outline"><a href="/developer/pipeline">Open Pipeline</a></Button>
+            </CardContent>
+          </Card>}
+          {criteriaOnly && form.profileType === "real_estate" && !supportsCriteria && <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader>
+              <CardTitle>No criteria editor for this asset class</CardTitle>
+              <CardDescription>This company’s current asset class does not have an editable criteria set on this page.</CardDescription>
+            </CardHeader>
+          </Card>}
+          {form.profileType === "real_estate" && form.assetClass === "multifamily_acquisition" && <Card className="rounded-2xl border-blue-200 bg-white shadow-sm">
+            <CardHeader>
+              <CardTitle>Existing-property acquisition criteria</CardTitle>
+              <CardDescription>Clear failures are Red, values within about 10% of numeric limits or 3 years of the vintage limit are Yellow, and otherwise qualifying deals are Green. Missing required property data is Yellow.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <StateMultiSelect label="Target states" values={form.targetStates} onChange={updateTargetStates} />
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <NumberField label="Minimum units (required)" value={form.purchaseCriteria.existing.minUnits?.toString() || ""} onChange={(value) => updatePurchaseCriteria("existing", "minUnits", value)} step={1} />
+                <NumberField label="Maximum units" value={form.purchaseCriteria.existing.maxUnits?.toString() || ""} onChange={(value) => updatePurchaseCriteria("existing", "maxUnits", value)} placeholder="No maximum" step={1} />
+                <NumberField label="Minimum vintage year (required)" value={form.purchaseCriteria.existing.minVintageYear?.toString() || ""} onChange={(value) => updatePurchaseCriteria("existing", "minVintageYear", value)} min={1800} max={2100} step={1} />
+                <NumberField label="Maximum vintage year" value={form.purchaseCriteria.existing.maxVintageYear?.toString() || ""} onChange={(value) => updatePurchaseCriteria("existing", "maxVintageYear", value)} placeholder="No maximum" min={1800} max={2100} step={1} />
+                <NumberField label="Minimum rent per SF" value={form.purchaseCriteria.existing.minRentPerSf?.toString() || ""} onChange={(value) => updatePurchaseCriteria("existing", "minRentPerSf", value)} placeholder="No minimum" step={0.01} />
+              </div>
+            </CardContent>
+          </Card>}
+          {form.profileType === "real_estate" && form.assetClass === "multifamily" && <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader>
+              <CardTitle>Purchase criteria</CardTitle>
+              <CardDescription>
+                Set separate limits for development land and existing properties. A deal with a recorded year built or existing unit count is screened as an existing property; otherwise it is screened as land.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-6 lg:grid-cols-2">
+              <section aria-labelledby="land-purchase-criteria-title" className="space-y-4 rounded-xl border border-slate-200 p-4">
+                <div>
+                  <h3 id="land-purchase-criteria-title" className="font-semibold text-slate-900">Land purchases</h3>
+                  <p className="mt-1 text-xs text-slate-500">Unit limits use the submitted maximum units allowed by zoning.</p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <NumberField label="Minimum acres" value={form.purchaseCriteria.land.minAcres?.toString() || ""} onChange={(value) => updatePurchaseCriteria("land", "minAcres", value)} />
+                  <NumberField label="Maximum acres" value={form.purchaseCriteria.land.maxAcres?.toString() || ""} onChange={(value) => updatePurchaseCriteria("land", "maxAcres", value)} placeholder="No maximum" />
+                  <NumberField label="Minimum unit capacity" value={form.purchaseCriteria.land.minUnits?.toString() || ""} onChange={(value) => updatePurchaseCriteria("land", "minUnits", value)} step={1} />
+                  <NumberField label="Maximum unit capacity" value={form.purchaseCriteria.land.maxUnits?.toString() || ""} onChange={(value) => updatePurchaseCriteria("land", "maxUnits", value)} placeholder="No maximum" step={1} />
+                </div>
+              </section>
+              <section aria-labelledby="existing-purchase-criteria-title" className="space-y-4 rounded-xl border border-slate-200 p-4">
+                <div>
+                  <h3 id="existing-purchase-criteria-title" className="font-semibold text-slate-900">Existing properties</h3>
+                  <p className="mt-1 text-xs text-slate-500">Set acceptable construction years and property unit counts. Leave a limit blank to ignore it.</p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <NumberField label="Minimum vintage year" value={form.purchaseCriteria.existing.minVintageYear?.toString() || ""} onChange={(value) => updatePurchaseCriteria("existing", "minVintageYear", value)} placeholder="No minimum" min={1800} max={2100} step={1} />
+                  <NumberField label="Maximum vintage year" value={form.purchaseCriteria.existing.maxVintageYear?.toString() || ""} onChange={(value) => updatePurchaseCriteria("existing", "maxVintageYear", value)} placeholder="No maximum" min={1800} max={2100} step={1} />
+                  <NumberField label="Minimum units" value={form.purchaseCriteria.existing.minUnits?.toString() || ""} onChange={(value) => updatePurchaseCriteria("existing", "minUnits", value)} step={1} />
+                  <NumberField label="Maximum units" value={form.purchaseCriteria.existing.maxUnits?.toString() || ""} onChange={(value) => updatePurchaseCriteria("existing", "maxUnits", value)} placeholder="No maximum" step={1} />
+                </div>
+              </section>
+            </CardContent>
+          </Card>}
+          {form.profileType === "real_estate" && form.assetClass === "multifamily" && <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader>
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl p-2" style={{ backgroundColor: `${secondaryColor}18`, color: primaryColor }}><Settings2 className="h-5 w-5" /></div>
+                <div><CardTitle>Criteria</CardTitle><CardDescription>These rules determine each deal’s profile-specific classification.</CardDescription></div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-5 md:grid-cols-2">
+                <StateMultiSelect label="Target states" values={form.targetStates} onChange={updateTargetStates} />
+                <CountyMarketEditor
+                  states={form.targetStates}
+                  values={form.targetCounties}
+                  labels={form.countyMarketLabels}
+                  onCountiesChange={(value) => update("targetCounties", value)}
+                  onLabelsChange={(value) => update("countyMarketLabels", value)}
+                />
+              </div>
+
+              <div>
+                <Label>Rent metric</Label>
+                <div className="mt-2 grid gap-3 md:grid-cols-2">
+                  {[
+                    { value: "psf" as const, title: "Rent Comps — Min $/SF", description: "Use minimum rent per square foot as the primary test." },
+                    { value: "per_unit" as const, title: "Rent Comps — Min $/Unit (Avg)", description: "Use average minimum rent per unit as the primary test." },
+                  ].map((option) => (
+                    <button
+                      type="button"
+                      key={option.value}
+                      onClick={() => update("rentMetric", option.value)}
+                      className={`rounded-lg border p-4 text-left transition ${form.rentMetric === option.value ? "border-2 bg-slate-50" : "border-slate-200 bg-white hover:border-slate-300"}`}
+                      style={form.rentMetric === option.value ? { borderColor: secondaryColor } : undefined}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-semibold text-slate-900">{option.title}</span>
+                        {form.rentMetric === option.value && <Check className="h-4 w-4 shrink-0" style={{ color: secondaryColor }} />}
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">{option.description}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                <NumberField
+                  label="Comparable search radius (miles)"
+                  value={form.compSearchRadiusMiles}
+                  onChange={(value) => update("compSearchRadiusMiles", value)}
+                  placeholder="3"
+                  required
+                />
+                <NumberField
+                  label="Minimum comp vintage year"
+                  value={form.compMinVintageYear}
+                  onChange={(value) => update("compMinVintageYear", value)}
+                  placeholder="Enter a year, e.g. 2020"
+                  required
+                  step={1}
+                  min={1900}
+                  max={2100}
+                  helperText="Required company criterion for comparable properties."
+                />
+                <NumberField
+                  label="Minimum comp units"
+                  value={form.compMinUnits}
+                  onChange={(value) => update("compMinUnits", value)}
+                  placeholder="Enter minimum units"
+                  required
+                  step={1}
+                  helperText="Required company criterion for comparable properties."
+                />
+              </div>
+
+              <div className="border-t border-slate-100 pt-5">
+                <div className="mb-3 flex items-center justify-between">
+                  <div><h3 className="font-semibold text-slate-900">Product types</h3><p className="text-sm text-slate-500">A deal is marked Review when it clears the acreage and rent criteria for any active product type.</p></div>
+                  <Button type="button" variant="outline" size="sm" onClick={addProductType}><Plus className="mr-1 h-4 w-4" />Add product type</Button>
+                </div>
+                {form.productTypes.length === 0 ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    Add at least one active product type before saving.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {form.productTypes.map((productType, index) => (
+                      <div key={productType.id || index} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.6fr)_minmax(0,0.6fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_auto] lg:items-end">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Label>Product type <span className="text-red-500">*</span></Label>
+                              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">Normal (Default)</span>
+                            </div>
+                            <ProductTypeNameField
+                              id={`developer-product-type-${index}`}
+                              value={productType.name}
+                              onChange={(name) => updateProductType(index, { name })}
+                              className="mt-2 bg-white"
+                            />
+                          </div>
+                          <NumberField
+                            label="Min acres"
+                            value={productType.minAcres}
+                            onChange={(value) => updateProductType(index, { minAcres: value })}
+                            required
+                          />
+                          <NumberField
+                            label="Max acres"
+                            value={productType.maxAcres || ""}
+                            onChange={(value) => updateProductType(index, { maxAcres: value })}
+                            placeholder="No maximum"
+                          />
+                          <NumberField
+                            label="Min rent $/SF"
+                            value={productType.minRentPsf || ""}
+                            onChange={(value) => updateProductType(index, { minRentPsf: value })}
+                            required={isPsf}
+                          />
+                          <NumberField
+                            label="Min rent $/Unit"
+                            value={productType.minRentPerUnit || ""}
+                            onChange={(value) => updateProductType(index, { minRentPerUnit: value })}
+                            required={!isPsf}
+                          />
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => update("productTypes", form.productTypes.filter((_, productIndex) => productIndex !== index))}
+                            aria-label={`Remove ${productType.name || "product type"}`}
+                          >
+                            <Trash2 className="h-4 w-4 text-slate-400" />
+                          </Button>
+                        </div>
+                        <div className="mt-4">
+                          <StateCriteriaOverrides
+                            targetStates={form.targetStates}
+                            value={productType.stateOverrides}
+                            fields={[
+                              { key: "minAcres", label: "Minimum acreage", suffix: "acres" },
+                              { key: "maxAcres", label: "Maximum acreage", suffix: "acres" },
+                              { key: "minRentPsf", label: "Minimum rent $/SF", suffix: "$/SF" },
+                              { key: "minRentPerUnit", label: "Minimum rent $/Unit", suffix: "$/Unit" },
+                            ]}
+                            onChange={(stateOverrides) => updateProductType(index, { stateOverrides })}
+                          />
+                        </div>
+                        <div className="mt-4 border-t border-slate-100 pt-4">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setAssumptionsOpenIndex((current) => current === index ? null : index)}
+                          >
+                            <Settings2 className="mr-2 h-4 w-4" />
+                            {assumptionsOpenIndex === index ? "Hide underwriting assumptions" : "Underwriting assumptions"}
+                            {assumptionsOpenIndex === index
+                              ? <ChevronUp className="ml-2 h-4 w-4" />
+                              : <ChevronDown className="ml-2 h-4 w-4" />}
+                          </Button>
+                          {assumptionsOpenIndex === index && (
+                            <YocAssumptionsPanel
+                              productType={{ id: productType.id, name: productType.name }}
+                              nationalDefaults={getNationalYocDefaults(productType.name)}
+                              value={productType}
+                              onChange={(assumptions: YocAssumptionsValue) => updateProductType(index, assumptions)}
+                              otherProductTypes={form.productTypes
+                                .filter((_, productIndex) => productIndex !== index)
+                                .map((otherProductType) => ({
+                                  id: otherProductType.id,
+                                  name: otherProductType.name,
+                                  value: otherProductType,
+                                }))}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>}
+
+          {form.profileType === "real_estate" && form.assetClass === "industrial" && <Card className="rounded-2xl border-amber-200 bg-amber-50 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-amber-950">Industrial site-screening criteria</CardTitle>
+              <CardDescription className="text-amber-900">
+                Configure the site requirements used to find and review industrial opportunities. Automated multifamily rent and YOC underwriting is not available for industrial profiles.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6 border-t border-amber-200 pt-5">
+              <IndustrialCriteriaFields
+                value={form.industrialCriteria}
+                onChange={(value) => update("industrialCriteria", value)}
+                 targetStates={form.targetStates}
+              />
+              <div className="grid gap-5 border-t border-amber-200 pt-5 md:grid-cols-2">
+                <StateMultiSelect label="Target states" values={form.targetStates} onChange={updateTargetStates} />
+                <CountyMarketEditor
+                  states={form.targetStates}
+                  values={form.targetCounties}
+                  labels={form.countyMarketLabels}
+                  onCountiesChange={(value) => update("targetCounties", value)}
+                  onLabelsChange={(value) => update("countyMarketLabels", value)}
+                />
+              </div>
+            </CardContent>
+          </Card>}
+
+          {form.profileType === "real_estate" && form.assetClass === "rural_land" && <Card className="rounded-2xl border-emerald-200 bg-emerald-50 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-emerald-950">Rural land acreage grading</CardTitle>
+              <CardDescription className="text-emerald-900">Red is below the Yellow minimum; meeting the acreage minimum is Yellow. Green is reserved for deals manually marked Pursuing. Rent and YOC criteria are not used.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-5 border-t border-emerald-200 pt-5">
+              <NumberField label="Yellow minimum acreage" value={String(form.ruralLandCriteria.yellowMinAcres)} onChange={(value) => update("ruralLandCriteria", { ...form.ruralLandCriteria, yellowMinAcres: Number(value) })} required />
+              <div className="sm:col-span-2 grid gap-5 md:grid-cols-2">
+                <StateMultiSelect label="Target states" values={form.targetStates} onChange={updateTargetStates} />
+                <CountyMarketEditor states={form.targetStates} values={form.targetCounties} labels={form.countyMarketLabels} onCountiesChange={(value) => update("targetCounties", value)} onLabelsChange={(value) => update("countyMarketLabels", value)} />
+              </div>
+            </CardContent>
+          </Card>}
+
+          {form.profileType === "real_estate" && form.assetClass === "multifamily" && <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader className="cursor-pointer" onClick={() => setOverridesOpen((open) => !open)}>
+              <div className="flex items-center justify-between">
+                <div><CardTitle>Rent minimum overrides</CardTitle><CardDescription>Allow qualifying public programs to bypass rent minimums.</CardDescription></div>
+                {overridesOpen ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
+              </div>
+            </CardHeader>
+            {overridesOpen && <CardContent className="grid gap-3 border-t border-slate-100 pt-5 md:grid-cols-3">
+              {[
+                ["qctOverridesRentMinimum", "Qualified Census Tract (QCT)"],
+                ["ddaOverridesRentMinimum", "Difficult Development Area (DDA)"],
+                ["ozOverridesRentMinimum", "Opportunity Zone (OZ)"],
+              ].map(([key, label]) => (
+                <label key={key} className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4">
+                  <Checkbox checked={Boolean(form[key as keyof Profile])} onCheckedChange={(checked) => update(key as keyof Profile, checked === true as never)} />
+                  <span className="text-sm font-medium leading-5 text-slate-700">{label} can override rent minimum</span>
+                </label>
+              ))}
+              <p className="text-xs text-slate-500 md:col-span-3">Overrides only rescue rent failures. County/state and acreage criteria still apply.</p>
+            </CardContent>}
+          </Card>}
+
+          <div className={criteriaOnly ? "hidden" : "space-y-6"}>
+          <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="rounded-xl p-2" style={{ backgroundColor: `${secondaryColor}18`, color: primaryColor }}>
+                    <ExternalLink className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>Quick Links</CardTitle>
+                    <CardDescription>Save the software and resources your team uses most.</CardDescription>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => {
+                    setEditingQuickLinkId(null);
+                    setQuickLinkLabel("");
+                    setQuickLinkUrl("");
+                    setQuickLinksOpen(true);
+                  }}
+                >
+                  <Plus className="mr-1 h-4 w-4" />Add link
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5 border-t border-slate-100 pt-5">
+              {quickLinksQuery.isLoading ? (
+                <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div>
+              ) : (quickLinksQuery.data?.links || []).length > 0 ? (
+                <div className="space-y-2">
+                  {quickLinksQuery.data?.links.map((link) => (
+                    <div key={link.id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-slate-900">{link.label}</p>
+                        <a
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 flex items-center gap-1 truncate text-xs text-slate-500 hover:underline"
+                        >
+                          <span className="truncate">{link.url}</span>
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                        </a>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setEditingQuickLinkId(link.id);
+                            setQuickLinkLabel(link.label);
+                            setQuickLinkUrl(link.url);
+                            setQuickLinksOpen(true);
+                          }}
+                          aria-label={`Edit ${link.label}`}
+                        >
+                          <Pencil className="h-4 w-4 text-slate-500" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteQuickLinkMutation.mutate(link.id)}
+                          disabled={deleteQuickLinkMutation.isPending}
+                          aria-label={`Delete ${link.label}`}
+                        >
+                          <Trash2 className="h-4 w-4 text-slate-400" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-lg bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">No quick links saved yet.</p>
+              )}
+
+              {quickLinksOpen && <div className="border-t border-slate-100 pt-5">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-800">
+                    {editingQuickLinkId ? "Edit link" : "Add link"}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setEditingQuickLinkId(null);
+                      setQuickLinkLabel("");
+                      setQuickLinkUrl("");
+                      setQuickLinksOpen(false);
+                    }}
+                  >
+                    Close
+                  </Button>
+                </div>
+                <div className="grid gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.4fr)_auto] md:items-end">
+                  <div>
+                    <Label htmlFor="quick-link-label">Label</Label>
+                    <Input
+                      id="quick-link-label"
+                      value={quickLinkLabel}
+                      onChange={(event) => setQuickLinkLabel(event.target.value)}
+                      placeholder="e.g. CoStar"
+                      className="mt-2 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="quick-link-url">URL</Label>
+                    <Input
+                      id="quick-link-url"
+                      type="url"
+                      value={quickLinkUrl}
+                      onChange={(event) => setQuickLinkUrl(event.target.value)}
+                      placeholder="https://example.com"
+                      className="mt-2 bg-white"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        const label = quickLinkLabel.trim();
+                        const url = quickLinkUrl.trim();
+                        if (!label || !url) {
+                          toast({ title: "Label and URL are required", variant: "destructive" });
+                          return;
+                        }
+                        quickLinkMutation.mutate({
+                          id: editingQuickLinkId || undefined,
+                          label,
+                          url,
+                        });
+                      }}
+                      disabled={quickLinkMutation.isPending}
+                      style={{ backgroundColor: primaryColor }}
+                      className="text-white"
+                    >
+                      {quickLinkMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                      Save
+                    </Button>
+                  </div>
+                </div>
+              </div>}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader className="cursor-pointer" onClick={() => setTeamOpen((open) => !open)}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3"><div className="rounded-xl bg-slate-100 p-2 text-slate-600"><Users className="h-5 w-5" /></div><div><CardTitle>Team</CardTitle><CardDescription>DealLinq approves and creates all company accounts.</CardDescription></div></div>
+                {teamOpen ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
+              </div>
+            </CardHeader>
+            {teamOpen && <CardContent className="border-t border-slate-100 pt-5">
+              <div className="mb-4 flex justify-end">
+                <Button asChild style={{ backgroundColor: primaryColor }} className="text-white">
+                  <a href="mailto:help@landlinq.ai?subject=Team%20member%20addition%20request&body=Requested%20teammate%20name%3A%0ARequested%20teammate%20email%3A%0AReason%20for%20access%3A%0A%0APlease%20review%20and%20approve%20this%20addition.">Request Team Member</a>
+                </Button>
+              </div>
+              {teamQuery.isLoading ? <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div> : (teamQuery.data?.team || []).length === 0 ? (
+                <p className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">No team members found.</p>
+              ) : (
+                <div className="table-scroll-container">
+                  <table className="w-full text-left text-sm">
+                    <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500"><th className="px-3 py-3 font-semibold">Name</th><th className="px-3 py-3 font-semibold">Email</th><th className="px-3 py-3 font-semibold">Date added</th></tr></thead>
+                    <tbody>{teamQuery.data?.team.map((member) => <tr key={member.id} className="border-b border-slate-100 last:border-0"><td className="px-3 py-3 font-medium text-slate-800">{[member.firstName, member.lastName].filter(Boolean).join(" ") || "—"}</td><td className="px-3 py-3 text-slate-600">{member.email}</td><td className="px-3 py-3 text-slate-500">{member.createdAt ? new Date(member.createdAt).toLocaleDateString() : "—"}</td></tr>)}</tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>}
+          </Card>
+          </div>
+        </div>
+      </main>
+
+      <Footer />
+    </div>
+  );
+}

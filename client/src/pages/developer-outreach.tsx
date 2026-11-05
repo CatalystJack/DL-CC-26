@@ -1,0 +1,739 @@
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
+import { CheckCircle2, Edit3, Loader2, Mail, MapPin, MessageSquare, Paperclip, Rocket, Send, Sparkles, Tag, Trash2, Users } from "lucide-react";
+import DeveloperNavigation from "@/components/developer-navigation";
+import { PageHeader } from "@/components/ui/page-header";
+import Footer from "@/components/footer";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { sanitizeSignatureHtml } from "@shared/signature-html";
+import { renderOutreachEmailBody } from "@shared/outreach-email-renderer";
+import { AttachmentFilenameLink, OutreachStepEmailPreview } from "@/components/outreach-step-email-preview";
+
+type SenderAccount = {
+  id: string;
+  name: string;
+  email: string;
+  outlookConnected: boolean;
+  connectionStatus: "connected" | "not_connected" | "needs_verification";
+  signatureHtml?: string | null;
+  hasRefreshToken?: boolean;
+  microsoftTokenExpiry?: string | null;
+};
+
+type Campaign = {
+  id: string;
+  name: string;
+  status: string;
+  subject: string;
+  content: string;
+  dayNumber: number;
+  enrollmentCount: number;
+  triggerTag?: string;
+  created_at?: string;
+  createdAt?: string;
+};
+
+type CampaignForm = {
+  name: string;
+  subject: string;
+  content: string;
+  triggerTag: string;
+  dayNumber: number;
+  status: "paused" | "active";
+};
+
+type AiMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+type SuggestedDraft = {
+  subject: string;
+  content: string;
+};
+
+type CampaignAttachment = {
+  filename: string;
+  url: string;
+  contentType: string;
+  size?: number;
+};
+
+type CampaignStep = {
+  id: string;
+  sequenceIndex: number;
+  dayNumber: number;
+  channel: "email" | "sms";
+  subject: string | null;
+  content: string;
+  isActive: boolean;
+  lineHeight?: string | null;
+  attachments: CampaignAttachment[];
+};
+
+const emptyForm: CampaignForm = {
+  name: "",
+  subject: "",
+  content: "Hi {{firstName}},\n\n",
+  triggerTag: "",
+  dayNumber: 0,
+  status: "paused",
+};
+
+async function jsonRequest(url: string, options?: RequestInit) {
+  const response = await fetch(url, { credentials: "include", ...options });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || data.message || "Request failed");
+  return data;
+}
+
+export default function DeveloperOutreach() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [, navigate] = useLocation();
+  const profile = (user as any)?.developerProfile;
+  const secondaryColor = profile?.secondaryColor || "#4A90E2";
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<Campaign | null>(null);
+  const [form, setForm] = useState<CampaignForm>(emptyForm);
+  const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
+  const [aiInput, setAiInput] = useState("");
+  const [aiSuggestedDraft, setAiSuggestedDraft] = useState<SuggestedDraft | null>(null);
+  const [stepsCampaign, setStepsCampaign] = useState<Campaign | null>(null);
+  const [stepEditorOpen, setStepEditorOpen] = useState(false);
+  const [stepDraft, setStepDraft] = useState<CampaignStep | null>(null);
+  const [testRecipientEmail, setTestRecipientEmail] = useState("");
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+
+  const senderQuery = useQuery<{ sender: SenderAccount | null }>({
+    queryKey: ["/api/developer-profile/me/outreach/sender"],
+    queryFn: () => jsonRequest("/api/developer-profile/me/outreach/sender"),
+  });
+  const campaignsQuery = useQuery<{ campaigns: Campaign[] }>({
+    queryKey: ["/api/developer-profile/me/outreach/campaigns"],
+    queryFn: () => jsonRequest("/api/developer-profile/me/outreach/campaigns"),
+  });
+  const targetsQuery = useQuery<{ contacts: any[]; count: number; targetStates: string[]; targetCounties: string[] }>({
+    queryKey: ["/api/developer-profile/me/outreach/targets"],
+    queryFn: () => jsonRequest("/api/developer-profile/me/outreach/targets"),
+  });
+  const campaignStepsQuery = useQuery<CampaignStep[]>({
+    queryKey: ["/api/developer-profile/me/outreach/campaigns/steps", stepsCampaign?.id],
+    queryFn: () => jsonRequest(`/api/developer-profile/me/outreach/campaigns/${stepsCampaign!.id}/steps`),
+    enabled: Boolean(stepsCampaign),
+  });
+  const aiConversationQuery = useQuery<{ messages: AiMessage[]; suggestedDraft: SuggestedDraft | null }>({
+    queryKey: ["/api/developer-profile/me/outreach/ai-conversation", editing?.id],
+    queryFn: () => jsonRequest(`/api/developer-profile/me/outreach/campaigns/${editing!.id}/ai-conversations/0`),
+    enabled: Boolean(dialogOpen && editing),
+  });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("success") === "outlook_connected") {
+      toast({ title: "Outlook connected", description: "Campaign email will send from your connected account." });
+      queryClient.invalidateQueries({ queryKey: ["/api/developer-profile/me/outreach/sender"] });
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (params.get("error")) {
+      toast({ title: "Outlook connection failed", description: params.get("error") || "Please try again.", variant: "destructive" });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [queryClient, toast]);
+
+  useEffect(() => {
+    if (!editing || !dialogOpen || !aiConversationQuery.data) return;
+    setAiMessages(aiConversationQuery.data.messages || []);
+    setAiSuggestedDraft(aiConversationQuery.data.suggestedDraft || null);
+  }, [aiConversationQuery.data, dialogOpen, editing]);
+
+  const connectMutation = useMutation({
+    mutationFn: async () => {
+      const prepared = await jsonRequest("/api/developer-profile/me/outreach/sender", { method: "POST" });
+      return jsonRequest(`/api/outreach/senders/${prepared.sender.id}/connect-outlook`, { method: "POST" });
+    },
+    onSuccess: (data) => {
+      if (!data.authUrl) throw new Error("Microsoft did not return an authorization URL");
+      window.location.href = data.authUrl;
+    },
+    onError: (error: Error) => toast({ title: "Could not connect Outlook", description: error.message, variant: "destructive" }),
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: () => jsonRequest(`/api/developer-profile/me/outreach/campaigns/${editing!.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      },
+    ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/developer-profile/me/outreach/campaigns"] });
+      setDialogOpen(false);
+      setEditing(null);
+      setForm(emptyForm);
+      toast({ title: "Campaign updated" });
+    },
+    onError: (error: Error) => toast({ title: "Could not save campaign", description: error.message, variant: "destructive" }),
+  });
+
+  const launchMutation = useMutation({
+    mutationFn: (campaignId: string) => jsonRequest(`/api/developer-profile/me/outreach/campaigns/${campaignId}/launch`, { method: "POST" }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/developer-profile/me/outreach/campaigns"] });
+      toast({ title: "Campaign launched", description: `${data.enrolled} contacts enrolled; ${data.skipped} already enrolled.` });
+    },
+    onError: (error: Error) => toast({ title: "Could not launch campaign", description: error.message, variant: "destructive" }),
+  });
+
+  const aiDraftMutation = useMutation({
+    mutationFn: () => jsonRequest(`/api/developer-profile/me/outreach/campaigns/${editing!.id}/ai-draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        stepKey: "0",
+        messages: aiMessages,
+        userMessage: aiInput,
+        currentDraft: { subject: form.subject, content: form.content },
+      }),
+    }),
+    onSuccess: (data: { reply: string; messages: AiMessage[]; suggestedDraft: SuggestedDraft }) => {
+      setAiMessages(data.messages || []);
+      setAiSuggestedDraft(data.suggestedDraft || null);
+      setAiInput("");
+    },
+    onError: (error: Error) => toast({ title: "Assistant unavailable", description: error.message, variant: "destructive" }),
+  });
+
+  const updateStepMutation = useMutation({
+    mutationFn: (draft: CampaignStep) => jsonRequest(
+      `/api/developer-profile/me/outreach/campaigns/${stepsCampaign!.id}/steps/${draft.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dayNumber: draft.dayNumber,
+          channel: draft.channel,
+          subject: draft.subject || "",
+          content: draft.content,
+          isActive: draft.isActive,
+          attachments: draft.attachments || [],
+        }),
+      },
+    ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/developer-profile/me/outreach/campaigns/steps", stepsCampaign?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/developer-profile/me/outreach/campaigns"] });
+      setStepEditorOpen(false);
+      setStepDraft(null);
+      toast({ title: "Step saved" });
+    },
+    onError: (error: Error) => toast({ title: "Could not save step", description: error.message, variant: "destructive" }),
+  });
+
+  const testStepMutation = useMutation({
+    mutationFn: () => jsonRequest(
+      `/api/developer-profile/me/outreach/campaigns/${stepsCampaign!.id}/steps/${stepDraft!.id}/test`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipientEmail: testRecipientEmail.trim() }),
+      },
+    ),
+    onSuccess: (data: { sender?: string; recipient?: string }) => {
+      toast({ title: "Test email sent", description: `${data.sender || "Your connected mailbox"} → ${data.recipient || testRecipientEmail}` });
+      setTestRecipientEmail("");
+    },
+    onError: (error: Error) => toast({ title: "Could not send test email", description: error.message, variant: "destructive" }),
+  });
+
+  const sender = senderQuery.data?.sender;
+  const senderName = sender?.name?.trim() || "Sender unavailable";
+  const senderEmail = sender?.email?.trim() || "Connect Outlook to show sender email";
+  const senderInitials = senderName
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .slice(0, 2)
+    .join("") || "?";
+  const campaigns = campaignsQuery.data?.campaigns || [];
+  const scopeLabel = useMemo(() => {
+    const states = targetsQuery.data?.targetStates || [];
+    const counties = targetsQuery.data?.targetCounties || [];
+    if (!states.length && !counties.length) return "All available contacts";
+    return [...states, ...counties].join(", ");
+  }, [targetsQuery.data]);
+
+  const openEdit = (campaign: Campaign) => {
+    setEditing(campaign);
+    setForm({
+      name: campaign.name,
+      subject: campaign.subject || "",
+      content: campaign.content || "",
+      triggerTag: campaign.triggerTag || "",
+      dayNumber: Number(campaign.dayNumber || 0),
+      status: campaign.status === "active" ? "active" : "paused",
+    });
+    setAiMessages([]);
+    setAiInput("");
+    setAiSuggestedDraft(null);
+    setDialogOpen(true);
+  };
+
+
+  const openSteps = (campaign: Campaign) => {
+    setStepsCampaign(campaign);
+    setStepEditorOpen(false);
+    setStepDraft(null);
+  };
+
+  const openStepEditor = (step: CampaignStep) => {
+    setStepDraft({
+      ...step,
+      subject: step.subject || "",
+      attachments: Array.isArray(step.attachments) ? [...step.attachments] : [],
+    });
+    setStepEditorOpen(true);
+  };
+
+  const uploadStepAttachment = async (file: File) => {
+    setUploadingAttachment(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const attachment = await jsonRequest("/api/upload/attachment", {
+        method: "POST",
+        body: formData,
+      });
+      setStepDraft((current) => current ? {
+        ...current,
+        attachments: [...(current.attachments || []), {
+          filename: attachment.filename,
+          url: attachment.url,
+          contentType: attachment.contentType,
+          size: attachment.size,
+        }],
+      } : current);
+      toast({ title: "Attachment uploaded", description: `${file.name} is ready to save with this step.` });
+    } catch (error: any) {
+      toast({ title: "Could not upload attachment", description: error.message, variant: "destructive" });
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const insertSuggestedDraft = (replace: boolean) => {
+    if (!aiSuggestedDraft) return;
+    setForm((current) => ({
+      ...current,
+      subject: replace || !current.subject.trim()
+        ? aiSuggestedDraft.subject
+        : current.subject,
+      content: replace || !current.content.trim()
+        ? aiSuggestedDraft.content
+        : `${current.content.trim()}\n\n${aiSuggestedDraft.content}`,
+    }));
+    toast({
+      title: replace ? "Draft replaced" : "Draft inserted",
+      description: replace
+        ? "The assistant suggestion replaced the email fields. Save when ready."
+        : "The assistant suggestion was added below your current message. Save when ready.",
+    });
+  };
+
+  const submitAiMessage = () => {
+    if (!editing || !aiInput.trim() || aiDraftMutation.isPending) return;
+    aiDraftMutation.mutate();
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <DeveloperNavigation />
+      <main className="mx-auto max-w-[1680px] px-4 py-8 sm:px-6 lg:px-8">
+        <PageHeader
+          title="Campaigns"
+        />
+
+        <div className="mb-6 grid gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-2 rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-lg"><div className="rounded-xl bg-[#3286C8]/15 p-2 text-[#3286C8]"><Mail className="h-4 w-4" /></div>Sending account</CardTitle></CardHeader>
+            <CardContent>
+              {senderQuery.isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : sender?.connectionStatus === "connected" ? (
+                <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                  <div>
+                    <div className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-600" /><p className="font-semibold text-slate-900">{sender.name || "Connected Outlook account"}</p></div>
+                    <p className="mt-1 text-sm text-slate-600">{sender.email || "Mailbox address is still loading"}</p>
+                    <p className="mt-1 text-xs text-slate-500">Campaigns send through this Microsoft Outlook account.</p>
+                    {sender.signatureHtml ? (
+                      <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Signature preview</p>
+                        <div dangerouslySetInnerHTML={{ __html: sanitizeSignatureHtml(sender.signatureHtml) }} />
+                      </div>
+                    ) : <p className="mt-2 text-xs text-amber-700">No signature is configured yet.</p>}
+                  </div>
+                  <Button variant="outline" onClick={() => navigate("/outreach-onboarding")}>
+                    <Edit3 className="mr-2 h-4 w-4" />
+                    Edit
+                  </Button>
+                </div>
+              ) : sender?.connectionStatus === "needs_verification" ? (
+                <div className="flex flex-col justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center">
+                  <div>
+                    <p className="font-semibold text-amber-900">Outlook needs verification</p>
+                    <p className="mt-1 text-sm text-amber-800">
+                      Reconnect {sender.email} in Outreach before launching campaigns from this mailbox.
+                    </p>
+                  </div>
+                  <Button variant="outline" onClick={() => navigate("/outreach-onboarding")}>
+                    <Edit3 className="mr-2 h-4 w-4" />
+                    Verify Outlook
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                   <div><p className="font-semibold text-slate-900">Connect your Outlook account</p><p className="mt-1 text-sm text-slate-500">You must connect your own mailbox before launching campaigns.</p></div>
+                  <Button variant="brand" onClick={() => connectMutation.mutate()} disabled={connectMutation.isPending}>{connectMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Connect Outlook</Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-lg"><div className="rounded-xl bg-[#3286C8]/15 p-2 text-[#3286C8]"><Users className="h-4 w-4" /></div>Target audience</CardTitle></CardHeader>
+            <CardContent><p className="text-3xl font-bold text-slate-950">{targetsQuery.data?.count ?? "—"}</p><p className="mt-1 text-sm text-slate-500">Eligible owned and shared contacts</p><div className="mt-3 flex items-start gap-2 text-xs text-slate-600"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>{scopeLabel}</span></div></CardContent>
+          </Card>
+        </div>
+
+        <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
+          <CardHeader className="border-b border-slate-100"><CardTitle className="flex items-center gap-2 text-lg"><div className="rounded-xl bg-[#3286C8]/15 p-2 text-[#3286C8]"><Send className="h-4 w-4" /></div>Your campaigns</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            {campaignsQuery.isLoading ? <div className="flex min-h-52 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div> : campaigns.length === 0 ? (
+               <div className="flex min-h-52 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 px-6 text-center"><Send className="mb-3 h-10 w-10 text-slate-300" /><p className="font-semibold text-slate-800">No campaigns available</p><p className="mt-1 text-sm text-slate-500">{sender?.connectionStatus === "connected" ? "Campaigns will appear here when they are configured." : sender?.connectionStatus === "needs_verification" ? "Verify Outlook before launching campaigns." : "Connect Outlook to get started."}</p></div>
+            ) : (
+              <div className="divide-y divide-slate-100">{campaigns.map((campaign) => (
+                <div key={campaign.id} className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-center">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-900">{campaign.name}</p><Badge variant={campaign.status === "active" ? "default" : "secondary"}>{campaign.status}</Badge>{campaign.status === "active" && campaign.triggerTag && <Badge variant="outline" className="gap-1 font-normal"><Tag className="h-3 w-3" />{campaign.triggerTag}</Badge>}</div>
+                    <p className="mt-1 text-sm text-slate-500">{campaign.subject}</p>
+                    <p className="mt-2 text-xs text-slate-400">{campaign.enrollmentCount || 0} enrolled · starts {campaign.dayNumber ? `after ${campaign.dayNumber} day${campaign.dayNumber === 1 ? "" : "s"}` : "immediately"}</p>
+                  </div>
+                    <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => openEdit(campaign)}><Edit3 className="mr-1.5 h-4 w-4" />Campaign</Button><Button variant="outline" size="sm" onClick={() => openSteps(campaign)}><Edit3 className="mr-1.5 h-4 w-4" />Steps</Button><Button variant="brand" size="sm" onClick={() => launchMutation.mutate(campaign.id)} disabled={launchMutation.isPending || sender?.connectionStatus !== "connected"}><Rocket className="mr-1.5 h-4 w-4" />Launch</Button></div>
+                </div>
+              ))}</div>
+            )}
+          </CardContent>
+        </Card>
+      </main>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
+          <DialogHeader><DialogTitle>Edit campaign</DialogTitle><DialogDescription>Email will send only from your connected Outlook account. Launching uses your saved target geography; tagged contacts can also enroll automatically.</DialogDescription></DialogHeader>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Sender identity</p>
+            <p className="mt-1 font-semibold text-slate-900">{sender?.name || "Connected Outlook account"}</p>
+            <p className="text-sm text-slate-600">{sender?.email || "Mailbox address unavailable"}</p>
+            {sender?.signatureHtml ? <div className="mt-2 border-t border-slate-200 pt-2 text-xs text-slate-600" dangerouslySetInnerHTML={{ __html: sanitizeSignatureHtml(sender.signatureHtml) }} /> : <p className="mt-2 text-xs text-amber-700">No configured signature will be added.</p>}
+          </div>
+          <div className="grid gap-6 py-2 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+            <div className="grid content-start gap-4">
+              <div><Label htmlFor="campaign-name">Campaign name</Label><Input id="campaign-name" className="mt-1.5" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Broker introduction" /></div>
+              <div><Label htmlFor="campaign-subject">Subject line</Label><Input id="campaign-subject" className="mt-1.5" value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="A quick introduction" /></div>
+              <div><Label htmlFor="campaign-trigger-tag">Auto-enrollment tag</Label><Input id="campaign-trigger-tag" className="mt-1.5" value={form.triggerTag} onChange={(event) => setForm({ ...form, triggerTag: event.target.value })} placeholder="Interested Broker" /><p className="mt-1 text-xs text-slate-500">Contacts owned by your company are enrolled when this exact CRM tag is added. Geography targeting remains available when you launch the campaign.</p></div>
+              <div>
+                <Label htmlFor="campaign-content">Email message</Label>
+                <RichTextEditor
+                  value={form.content}
+                  onChange={(content) => setForm({ ...form, content })}
+                  placeholder="Write your email message..."
+                  minHeight="220px"
+                  className="mt-1.5"
+                />
+                <p className="mt-1 text-xs text-slate-500">Use {"{{firstName}}"}, {"{{companyName}}"}, {"{{targetMarket}}"}, or {"{{county}}"} to personalize the email with each broker’s CRM county. Your edits stay in place until you choose an assistant action.</p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2"><div><Label htmlFor="campaign-delay">Send delay in days</Label><Input id="campaign-delay" type="number" min={0} max={365} className="mt-1.5" value={form.dayNumber} onChange={(event) => setForm({ ...form, dayNumber: Number(event.target.value) })} /></div><div><Label htmlFor="campaign-status">Status</Label><select id="campaign-status" value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as "paused" | "active" })} className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"><option value="paused">Draft / paused</option><option value="active">Active</option></select></div></div>
+            </div>
+            <Card className="flex min-h-[520px] flex-col border-slate-200 bg-slate-50/70">
+              <CardHeader className="border-b border-slate-200 pb-3">
+                <CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4" style={{ color: secondaryColor }} />Writing assistant</CardTitle>
+                <p className="text-xs font-normal text-slate-500">Ask for a rewrite, tone change, shorter copy, or a follow-up. The assistant uses this company’s saved criteria and current draft.</p>
+              </CardHeader>
+              <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-3">
+                {aiConversationQuery.isLoading ? (
+                  <div className="flex flex-1 items-center justify-center text-sm text-slate-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Restoring conversation…</div>
+                ) : !editing ? (
+                  <div className="flex flex-1 flex-col items-center justify-center px-5 text-center text-sm text-slate-500"><MessageSquare className="mb-2 h-7 w-7 text-slate-300" /><p>Save the campaign first, then refine its first step here.</p></div>
+                ) : (
+                  <>
+                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                      {aiMessages.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-sm text-slate-500">Try “Make this warmer and keep it under 100 words.”</div>
+                      ) : aiMessages.map((message, index) => (
+                        <div key={`${message.role}-${index}`} className={`rounded-lg px-3 py-2 text-sm ${message.role === "user" ? "ml-5 bg-slate-900 text-white" : "mr-5 border border-slate-200 bg-white text-slate-700"}`}>
+                          {message.content}
+                        </div>
+                      ))}
+                    </div>
+                    {aiSuggestedDraft && (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-800">Suggested draft</p>
+                        <p className="mt-1 line-clamp-2 text-sm font-medium text-slate-900">{aiSuggestedDraft.subject}</p>
+                        <p className="mt-1 line-clamp-3 whitespace-pre-line text-xs text-slate-600">{aiSuggestedDraft.content}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button type="button" variant="brand" size="sm" onClick={() => insertSuggestedDraft(false)}>Insert into email</Button>
+                          <Button type="button" size="sm" variant="outline" onClick={() => insertSuggestedDraft(true)}>Replace draft</Button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex items-end gap-2">
+                      <Textarea
+                        aria-label="Ask the writing assistant"
+                        value={aiInput}
+                        onChange={(event) => setAiInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                            event.preventDefault();
+                            submitAiMessage();
+                          }
+                        }}
+                        placeholder="e.g. Make it more direct…"
+                        className="min-h-20 resize-none bg-white"
+                        disabled={aiDraftMutation.isPending}
+                      />
+                      <Button type="button" variant="brand" size="icon" onClick={submitAiMessage} disabled={!aiInput.trim() || aiDraftMutation.isPending} className="shrink-0" aria-label="Send to writing assistant">
+                        {aiDraftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-slate-400">Ctrl/⌘ + Enter to send. Suggestions never change the email until you choose an action.</p>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button><Button variant="brand" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name.trim() || !form.subject.trim() || !form.content.trim()}>{saveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save Campaign</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(stepsCampaign)} onOpenChange={(open) => !open && setStepsCampaign(null)}>
+        <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit campaign steps</DialogTitle>
+            <DialogDescription>
+              Edit timing, delivery method, content, attachments, and active state. Changes are saved to this company’s campaign only.
+            </DialogDescription>
+          </DialogHeader>
+          {campaignStepsQuery.isLoading ? (
+            <div className="flex min-h-40 items-center justify-center text-sm text-slate-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading steps…</div>
+          ) : !campaignStepsQuery.data?.length ? (
+            <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">This campaign has no saved steps yet.</div>
+          ) : (
+            <div className="space-y-3">
+              {campaignStepsQuery.data.map((step) => (
+                <Card key={step.id} className="border-slate-200">
+                  <CardContent className="flex flex-col justify-between gap-4 p-4 sm:flex-row sm:items-start">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">Step {step.sequenceIndex + 1}</Badge>
+                        <Badge variant="secondary">Day {step.dayNumber}</Badge>
+                        <Badge variant={step.isActive ? "default" : "secondary"}>{step.isActive ? "Active" : "Paused"}</Badge>
+                        <span className="text-xs uppercase tracking-wide text-slate-400">{step.channel}</span>
+                      </div>
+                      <p className="mt-2 truncate font-semibold text-slate-900">{step.subject || "No subject"}</p>
+                       <p className="mt-1 line-clamp-2 whitespace-pre-line text-sm text-slate-500">{step.content.replace(/<[^>]*>/g, " ").replace(/[ \t]+/g, " ").trim()}</p>
+                      {step.attachments?.length > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                          <Paperclip className="h-3.5 w-3.5" />
+                          {step.attachments.map((attachment, index) => (
+                            <AttachmentFilenameLink key={`${attachment.filename}-${index}`} filename={attachment.filename} url={attachment.url} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      {step.channel === "email" && (
+                        <OutreachStepEmailPreview
+                          subject={step.subject}
+                          content={step.content}
+                          attachments={step.attachments}
+                          signatureHtml={sender?.signatureHtml}
+                          lineHeight={step.lineHeight || "1.5"}
+                        />
+                      )}
+                      <Button variant="outline" size="sm" onClick={() => openStepEditor(step)}><Edit3 className="mr-1.5 h-4 w-4" />Edit step</Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+          <DialogFooter><Button variant="outline" onClick={() => setStepsCampaign(null)}>Done</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={stepEditorOpen} onOpenChange={setStepEditorOpen}>
+        <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{stepDraft ? `Edit step ${stepDraft.sequenceIndex + 1}` : "Edit campaign step"}</DialogTitle>
+            <DialogDescription>Use the same formatted editor as the outreach configuration screen. Preview the exact HTML before saving.</DialogDescription>
+          </DialogHeader>
+          {stepDraft && (
+            <div className="grid gap-6 py-2 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+              <div className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <Label htmlFor="developer-step-day">Send on day</Label>
+                    <Input id="developer-step-day" type="number" min={0} max={365} className="mt-1.5" value={stepDraft.dayNumber} onChange={(event) => setStepDraft({ ...stepDraft, dayNumber: Number(event.target.value) })} />
+                  </div>
+                  <div>
+                    <Label htmlFor="developer-step-channel">Method</Label>
+                    <select id="developer-step-channel" value={stepDraft.channel} onChange={(event) => setStepDraft({ ...stepDraft, channel: event.target.value as CampaignStep["channel"] })} className="mt-1.5 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm">
+                      <option value="email">Email</option>
+                      <option value="sms">SMS</option>
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 pt-7 text-sm text-slate-700">
+                    <input type="checkbox" checked={stepDraft.isActive} onChange={(event) => setStepDraft({ ...stepDraft, isActive: event.target.checked })} className="h-4 w-4 rounded border-slate-300" />
+                    Active step
+                  </label>
+                </div>
+                {stepDraft.channel === "email" && (
+                  <>
+                    <div><Label htmlFor="developer-step-subject">Subject line</Label><Input id="developer-step-subject" className="mt-1.5" value={stepDraft.subject || ""} onChange={(event) => setStepDraft({ ...stepDraft, subject: event.target.value })} maxLength={240} /></div>
+                    <div>
+                      <Label>Email content</Label>
+                      <RichTextEditor
+                        value={stepDraft.content}
+                        onChange={(content) => setStepDraft({ ...stepDraft, content })}
+                        placeholder="Write your email content..."
+                        minHeight="260px"
+                        className="mt-1.5"
+                        lineHeight={stepDraft.lineHeight || "1.5"}
+                        onLineHeightChange={(lineHeight) => setStepDraft({ ...stepDraft, lineHeight })}
+                      />
+                    </div>
+                  </>
+                )}
+                {stepDraft.channel === "sms" && <div><Label htmlFor="developer-step-sms">Message</Label><Textarea id="developer-step-sms" className="mt-1.5 min-h-36" value={stepDraft.content} onChange={(event) => setStepDraft({ ...stepDraft, content: event.target.value })} /></div>}
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div><p className="text-sm font-semibold text-slate-900">Attachments</p><p className="text-xs text-slate-500">PDFs, documents, spreadsheets, text files, and images up to 50 MB.</p></div>
+                    <label className="inline-flex cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                      {uploadingAttachment ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Paperclip className="mr-2 h-4 w-4" />}
+                      Add file
+                      <input type="file" className="sr-only" disabled={uploadingAttachment} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadStepAttachment(file); event.currentTarget.value = ""; }} />
+                    </label>
+                  </div>
+                  {stepDraft.attachments?.length > 0 && <div className="mt-3 space-y-2">{stepDraft.attachments.map((attachment, index) => (
+                    <div key={`${attachment.url}-${index}`} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <span className="flex min-w-0 items-center gap-2 truncate"><Paperclip className="h-3.5 w-3.5 shrink-0 text-slate-400" /><AttachmentFilenameLink filename={attachment.filename} url={attachment.url} className="truncate" /></span>
+                      <button type="button" className="text-slate-400 hover:text-red-600" aria-label={`Remove ${attachment.filename}`} onClick={() => setStepDraft({ ...stepDraft, attachments: stepDraft.attachments.filter((_, attachmentIndex) => attachmentIndex !== index) })}><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  ))}</div>}
+                </div>
+                {stepDraft.channel === "email" && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-slate-900">Send a test</p>
+                    <p className="mt-1 text-xs text-slate-500">Enter a recipient explicitly. This never sends to a guessed or default address.</p>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <Input type="email" placeholder="you@example.com" value={testRecipientEmail} onChange={(event) => setTestRecipientEmail(event.target.value)} />
+                      <Button type="button" variant="outline" onClick={() => testStepMutation.mutate()} disabled={!testRecipientEmail.trim() || testStepMutation.isPending}><Send className="mr-1.5 h-4 w-4" />Send Test</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex h-full flex-col">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Mail className="h-4 w-4 text-[#0078D4]" />
+                    <Label className="text-xs font-medium">Outlook Preview</Label>
+                  </div>
+                  {stepDraft.channel === "email" && (
+                    <OutreachStepEmailPreview
+                      subject={stepDraft.subject}
+                      content={stepDraft.content}
+                      attachments={stepDraft.attachments}
+                      signatureHtml={sender?.signatureHtml}
+                      lineHeight={stepDraft.lineHeight || "1.5"}
+                    />
+                  )}
+                </div>
+                {stepDraft.channel === "email" ? (
+                  <div className="flex flex-1 flex-col overflow-hidden rounded-lg border bg-white shadow-lg">
+                    <div className="flex items-center gap-2 bg-[#0078D4] px-4 py-2 text-white">
+                      <Mail className="h-4 w-4" />
+                      <span className="text-sm font-medium">Outlook</span>
+                    </div>
+                    <div className="space-y-2 border-b bg-gray-50 px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0078D4] text-sm font-semibold text-white">
+                          {senderInitials}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="truncate text-sm font-semibold">{senderName}</span>
+                            <span className="shrink-0 text-xs text-gray-500">Just now</span>
+                          </div>
+                          <div className="truncate text-xs text-gray-500">{senderEmail}</div>
+                          <div className="mt-1 truncate text-xs text-gray-400">Merge fields stay as tokens</div>
+                        </div>
+                      </div>
+                      <div className="pl-13 text-sm font-semibold text-gray-800">{stepDraft.subject || "(No subject line)"}</div>
+                    </div>
+                    <div className="min-h-[320px] flex-1 overflow-auto bg-white p-4">
+                      <div
+                        className="max-w-none text-sm text-gray-700 [&_table]:w-auto [&_table]:max-w-full [&_td]:!align-top [&_img]:max-w-none"
+                        style={{ lineHeight: stepDraft.lineHeight || "1.5" }}
+                        dangerouslySetInnerHTML={{
+                          __html: renderOutreachEmailBody(
+                            stepDraft.content,
+                            sender?.signatureHtml ? sanitizeSignatureHtml(sender.signatureHtml) : "",
+                          ).htmlBody,
+                        }}
+                      />
+                      {stepDraft.attachments?.length ? (
+                        <div className="mt-4 border-t pt-3 text-xs text-slate-600">
+                          {stepDraft.attachments.map((attachment, index) => (
+                            <p key={`${attachment.filename}-${index}`} className="flex justify-between gap-3">
+                              <AttachmentFilenameLink filename={attachment.filename} url={attachment.url} className="truncate" />
+                              <span className="shrink-0">{Number(attachment.size || 0).toLocaleString()} bytes</span>
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="border-t bg-gray-50 px-4 py-2 text-center text-xs text-gray-400">
+                      Merge fields remain as tokens in this preview
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex min-h-[320px] flex-1 flex-col overflow-hidden rounded-lg border bg-white shadow-lg">
+                    <div className="bg-gray-900 px-4 py-2 text-center text-sm font-medium text-white">SMS Preview</div>
+                    <div className="p-4">
+                      <p className="whitespace-pre-wrap text-sm text-slate-700">{stepDraft.content || "Your SMS message will appear here."}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStepEditorOpen(false)}>Cancel</Button>
+            <Button variant="brand" onClick={() => stepDraft && updateStepMutation.mutate(stepDraft)} disabled={!stepDraft || updateStepMutation.isPending || !stepDraft.content.trim()}>
+              {updateStepMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save step
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Footer />
+    </div>
+  );
+}

@@ -1,0 +1,368 @@
+import { useState, useEffect } from 'react';
+import { isPlatformAdminEmail, isSuperAdminEmail } from "@shared/admin-auth";
+
+// User role types matching backend (for system access control)
+export enum UserRole {
+  SUPER_ADMIN = 'super_admin',
+  ADMIN = 'admin',
+  ANALYST = 'analyst',
+  DEVELOPER = 'developer',
+  ACCOUNT_MANAGER = 'account_manager',
+  PARTNER = 'partner',
+  BROKER = 'broker',
+  VIEWER = 'viewer',
+  DEMO = 'demo'
+}
+
+// Business roles for profiles and team assignments
+export enum BusinessRole {
+  JUNIOR_ANALYST = 'junior_analyst',
+  SENIOR_ANALYST = 'senior_analyst', 
+  SENIOR_DEVELOPER = 'senior_developer',
+  MANAGING_PARTNER = 'managing_partner'
+}
+
+// User interface type
+export interface AuthUser {
+  id?: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  role?: string;
+  dealRole?: string;
+  productTypes?: string[];
+  states?: string[];
+  [key: string]: any;
+}
+
+export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'uncertain';
+
+// Helper to format business roles for display
+export function formatBusinessRole(role: BusinessRole | string): string {
+  const roleMap: { [key: string]: string } = {
+    'junior_analyst': 'Junior Analyst',
+    'senior_analyst': 'Senior Analyst',
+    'senior_developer': 'Senior Developer', 
+    'managing_partner': 'Managing Partner'
+  };
+  return roleMap[role] || role;
+}
+
+// Single global state for auth to prevent multiple calls
+let globalAuthState: {
+  user: AuthUser | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  isInitialized: boolean;
+  userRole: UserRole | null;
+  businessRole: BusinessRole | null;
+  permissions: string[];
+  authStatus: AuthStatus;
+} = {
+  user: null,
+  isLoading: true,
+  isAuthenticated: false,
+  isInitialized: false,
+  userRole: null,
+  businessRole: null,
+  permissions: [],
+  authStatus: 'loading'
+};
+
+const authListeners: Set<() => void> = new Set();
+let authFetchPromise: Promise<void> | null = null;
+let authRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+const notifyListeners = () => {
+  authListeners.forEach(listener => listener());
+};
+
+export function clearLocalAuthState() {
+  globalAuthState = {
+    user: null,
+    isLoading: false,
+    isAuthenticated: false,
+    isInitialized: true,
+    userRole: null,
+    businessRole: null,
+    permissions: [],
+    authStatus: 'unauthenticated',
+  };
+  if (authRetryTimer) {
+    clearTimeout(authRetryTimer);
+    authRetryTimer = null;
+  }
+  notifyListeners();
+}
+
+const RETRY_DELAYS_MS = [250, 500, 1000, 2000];
+const RETRY_LATER_MS = 30_000;
+const AUTH_REVALIDATE_INTERVAL_MS = 60_000;
+let lastAuthRevalidationAt = 0;
+
+function isRetryableAuthFailure(status?: number) {
+  return status === undefined || status === 408 || status === 429 || (status >= 500 && status <= 599);
+}
+
+const fetchUserOnce = async (force = false): Promise<void> => {
+  if (globalAuthState.isInitialized && !force) return;
+  if (authFetchPromise) return authFetchPromise;
+
+  authFetchPromise = (async () => {
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+      try {
+        const response = await fetch('/api/user', {
+          credentials: 'include',
+          headers: { 'Cache-Control': 'no-cache' }
+        });
+
+        if (response.ok) {
+          const user = await response.json();
+          const userRole = await determineUserRole(user);
+          const businessRole = await determineBusinessRole(user);
+          const permissions = await getUserPermissions(userRole);
+
+          globalAuthState = {
+            user,
+            isLoading: false,
+            isAuthenticated: true,
+            isInitialized: true,
+            userRole,
+            businessRole,
+            permissions,
+            authStatus: 'authenticated',
+          };
+          if (authRetryTimer) {
+            clearTimeout(authRetryTimer);
+            authRetryTimer = null;
+          }
+          notifyListeners();
+          return;
+        }
+
+        if (!isRetryableAuthFailure(response.status)) {
+          // A 401 is the server's explicit indication that the session is gone.
+          globalAuthState = {
+            user: null,
+            isLoading: false,
+            isAuthenticated: false,
+            isInitialized: true,
+            userRole: null,
+            businessRole: null,
+            permissions: [],
+            authStatus: 'unauthenticated',
+          };
+          notifyListeners();
+          return;
+        }
+        if (attempt === RETRY_DELAYS_MS.length) break;
+      } catch (error) {
+        if (attempt === RETRY_DELAYS_MS.length) {
+          console.error('Auth fetch error after retries:', error);
+          break;
+        }
+      }
+
+      await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+    }
+
+    // Do not turn a temporary outage into a logout. Keep the last confirmed
+    // identity and retry in the background so recovery needs no page reload.
+    globalAuthState = {
+      ...globalAuthState,
+      isLoading: false,
+      isInitialized: true,
+      authStatus: 'uncertain',
+    };
+    if (!authRetryTimer) {
+      authRetryTimer = setTimeout(() => {
+        authRetryTimer = null;
+        void fetchUserOnce(true);
+      }, RETRY_LATER_MS);
+    }
+    notifyListeners();
+  })();
+
+  try {
+    await authFetchPromise;
+  } finally {
+    authFetchPromise = null;
+  }
+};
+
+// Helper function to determine user role
+async function determineUserRole(user: any): Promise<UserRole | null> {
+  const email = String(user?.email || user?.claims?.email || '').trim().toLowerCase();
+  const rawRole = String(user?.role || user?.claims?.role || '').trim();
+  const normalizedRole = rawRole.toUpperCase();
+  const roleMapping: { [key: string]: UserRole } = {
+    'SUPER_ADMIN': UserRole.SUPER_ADMIN,
+    'ADMIN': UserRole.ADMIN,
+    'ANALYST': UserRole.ANALYST,
+    'DEVELOPER': UserRole.DEVELOPER,
+    'ACCOUNT_MANAGER': UserRole.ACCOUNT_MANAGER,
+    'PARTNER': UserRole.PARTNER,
+    'BROKER': UserRole.BROKER,
+    'VIEWER': UserRole.VIEWER,
+    'DEMO': UserRole.DEMO,
+  };
+
+  // The two designated platform owners retain super-admin privileges,
+  // regardless of a stale database role value.
+  if (isSuperAdminEmail(email)) {
+    return UserRole.SUPER_ADMIN;
+  }
+
+  // Other platform-domain accounts use the parent platform view with
+  // standard administrator privileges.
+  if (isPlatformAdminEmail(email)) {
+    return UserRole.ADMIN;
+  }
+  
+  // Persisted roles are authoritative, including when an OAuth/session
+  // payload does not include an email address.
+  if (normalizedRole && roleMapping[normalizedRole]) {
+    return roleMapping[normalizedRole];
+  }
+
+  if (!email) return null;
+  
+  // If no recognized persisted role is available, use the least-privileged
+  // default rather than inferring internal access from an email address.
+  return UserRole.BROKER;
+}
+
+// Helper function to determine business role
+async function determineBusinessRole(user: any): Promise<BusinessRole | null> {
+  const email = String(user?.email || user?.claims?.email || '').trim().toLowerCase();
+  if (!email) return null;
+  
+  // Check if user has explicit business role from backend
+  if (user.business_role) {
+    return user.business_role as BusinessRole;
+  }
+  
+  // Default business role mapping based on email
+  // Managing partners
+  if (email === 'jack@catalystcp.com') {
+    return BusinessRole.MANAGING_PARTNER;
+  }
+  
+  // Default analysts to senior analyst for now
+  if (email.endsWith('@catalystcp.com')) {
+    return BusinessRole.SENIOR_ANALYST;
+  }
+  
+  return null;
+}
+
+// Helper function to get user permissions based on role
+async function getUserPermissions(role: UserRole | null): Promise<string[]> {
+  if (!role) return [];
+  
+  const rolePermissions = {
+    [UserRole.SUPER_ADMIN]: [
+      'create_deal', 'read_deal', 'update_deal', 'delete_deal', 'analyze_deal',
+      'manage_brokers', 'view_broker_analytics', 'system_admin', 'view_audit_logs',
+      'manage_users', 'view_commissions', 'manage_commissions', 'access_ai_analysis',
+      'configure_ai_settings'
+    ],
+    [UserRole.ADMIN]: [
+      'create_deal', 'read_deal', 'update_deal', 'delete_deal', 'analyze_deal',
+      'manage_brokers', 'view_broker_analytics', 'view_audit_logs', 'manage_users',
+      'view_commissions', 'manage_commissions', 'access_ai_analysis', 'configure_ai_settings'
+    ],
+    [UserRole.ANALYST]: [
+      'create_deal', 'read_deal', 'update_deal', 'delete_deal', 'analyze_deal',
+      'view_broker_analytics', 'view_commissions', 'access_ai_analysis'
+    ],
+    [UserRole.DEVELOPER]: [
+      'create_deal', 'read_deal', 'update_deal', 'delete_deal', 'analyze_deal',
+      'view_broker_analytics', 'view_commissions', 'access_ai_analysis'
+    ],
+    [UserRole.PARTNER]: [
+      'create_deal', 'read_deal', 'update_deal', 'delete_deal', 'analyze_deal',
+      'view_broker_analytics', 'view_commissions', 'access_ai_analysis'
+    ],
+    [UserRole.BROKER]: [
+      'create_deal', 'read_deal', 'update_deal', 'view_commissions', 'access_ai_analysis'
+    ],
+    [UserRole.VIEWER]: [
+      'read_deal', 'view_broker_analytics'
+    ]
+  };
+  
+  return rolePermissions[role] || [];
+}
+
+export function useAuth() {
+  const [, forceUpdate] = useState({});
+  
+  useEffect(() => {
+    const listener = () => forceUpdate({});
+    authListeners.add(listener);
+
+    const refreshAfterReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastAuthRevalidationAt < AUTH_REVALIDATE_INTERVAL_MS) return;
+      lastAuthRevalidationAt = now;
+      if (authRetryTimer) {
+        clearTimeout(authRetryTimer);
+        authRetryTimer = null;
+      }
+      void fetchUserOnce(true);
+    };
+    window.addEventListener("focus", refreshAfterReturn);
+    document.addEventListener("visibilitychange", refreshAfterReturn);
+    
+    // Only fetch once globally
+    if (!globalAuthState.isInitialized) {
+      fetchUserOnce();
+    }
+    
+    return () => {
+      authListeners.delete(listener);
+      window.removeEventListener("focus", refreshAfterReturn);
+      document.removeEventListener("visibilitychange", refreshAfterReturn);
+    };
+  }, []);
+
+  return {
+    user: globalAuthState.user,
+    isLoading: globalAuthState.isLoading,
+    isAuthenticated: globalAuthState.isAuthenticated,
+    isInitialized: globalAuthState.isInitialized,
+    userRole: globalAuthState.userRole,
+    businessRole: globalAuthState.businessRole,
+    permissions: globalAuthState.permissions,
+    authStatus: globalAuthState.authStatus,
+    isUncertain: globalAuthState.authStatus === 'uncertain',
+    hasPermission: (permission: string) => globalAuthState.permissions.includes(permission),
+    isRole: (role: UserRole) => globalAuthState.userRole === role,
+    isBusinessRole: (role: BusinessRole) => globalAuthState.businessRole === role,
+    refetch: async () => {
+      if (authRetryTimer) {
+        clearTimeout(authRetryTimer);
+        authRetryTimer = null;
+      }
+      globalAuthState.isInitialized = false;
+      globalAuthState.isLoading = true;
+      globalAuthState.authStatus = globalAuthState.user ? 'authenticated' : 'loading';
+      notifyListeners();
+      await fetchUserOnce(true);
+    },
+    logout: async () => {
+      try {
+        await fetch('/api/logout', { 
+          method: 'POST',
+          credentials: 'include'
+        });
+      } catch (error) {
+        console.error('Logout request failed:', error);
+      } finally {
+        window.location.href = '/';
+      }
+    }
+  };
+}
